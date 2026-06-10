@@ -1,34 +1,47 @@
-import serial
 import time
+import csv
 import Adafruit_DHT
 import RPi.GPIO as GPIO
 from tkinter import Tk, Label
+import busio
+import digitalio
+import board
+from adafruit_mcp3xxx.mcp3008 import MCP3008
+from adafruit_mcp3xxx.analog_in import AnalogIn
 
 # -----------------------------
 # GPIO Setup
 # -----------------------------
-PUMP_PIN = 27          # GPIO pin connected to relay controlling pump
+PUMP_PIN = 27
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(PUMP_PIN, GPIO.OUT)
 GPIO.output(PUMP_PIN, GPIO.LOW)  # Pump OFF initially
 
 # DHT11 Sensor
 DHT_SENSOR = Adafruit_DHT.DHT11
-DHT_PIN = 4  # GPIO pin connected to DHT11
+DHT_PIN = 4
 
 # -----------------------------
-# Serial Setup (ESP32 soil sensor)
+# MCP3008 Setup for Soil Moisture
 # -----------------------------
-SERIAL_PORT = '/dev/serial0'
-BAUD_RATE = 115200
+spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
+cs = digitalio.DigitalInOut(board.D8)  # CE0
+mcp = MCP3008(spi, cs)
+soil_channel = AnalogIn(mcp, 0)
 
-try:
-    ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-    ser.reset_input_buffer()
-    print("Listening for ESP32 moisture data...")
-except Exception as e:
-    print(f"Error opening serial port: {e}")
-    ser = None
+# Calibration
+DRY_VALUE = 35000   # ADC value when dry
+WET_VALUE = 15000   # ADC value when wet
+
+# -----------------------------
+# CSV Logging Setup
+# -----------------------------
+CSV_FILE = "sensor_readings.csv"
+
+# Create CSV with headers if not exist
+with open(CSV_FILE, mode="w", newline="") as f:
+    writer = csv.writer(f)
+    writer.writerow(["Timestamp", "Temperature_C", "Humidity_%", "Soil_Moisture_%", "Pump_Status"])
 
 # -----------------------------
 # Tkinter GUI Setup
@@ -40,29 +53,25 @@ label = Label(root, text="", font=("Arial", 16))
 label.pack(pady=20)
 
 def update_readings():
-    # Read DHT11 temperature and humidity
+    # Read DHT11
     humidity, temperature = Adafruit_DHT.read_retry(DHT_SENSOR, DHT_PIN)
     if humidity is None or temperature is None:
         humidity, temperature = 0, 0
 
-    # Read soil moisture from ESP32 serial
-    soil_moisture = 0
-    if ser and ser.in_waiting > 0:
-        line = ser.readline().decode('utf-8').rstrip()
-        if line.startswith("MOISTURE_PCT:"):
-            soil_moisture = int(line.split(":")[1])
-        else:
-            print(f"Raw incoming data: {line}")
+    # Read Soil Moisture from MCP3008
+    raw_value = soil_channel.value
+    raw_value = min(max(raw_value, WET_VALUE), DRY_VALUE)
+    soil_moisture = int((DRY_VALUE - raw_value) / (DRY_VALUE - WET_VALUE) * 100)
 
-    # Water pump logic: turn on if soil is dry (<40%)
+    # Pump logic
     if soil_moisture < 40:
-        GPIO.output(PUMP_PIN, GPIO.HIGH)  # Pump ON
+        GPIO.output(PUMP_PIN, GPIO.HIGH)
         pump_status = "ON"
     else:
-        GPIO.output(PUMP_PIN, GPIO.LOW)   # Pump OFF
+        GPIO.output(PUMP_PIN, GPIO.LOW)
         pump_status = "OFF"
 
-    # Update Tkinter label
+    # Update GUI
     label_text = (
         f"Temp: {temperature:.1f}°C\n"
         f"Humidity: {humidity:.1f}%\n"
@@ -71,14 +80,18 @@ def update_readings():
     )
     label.config(text=label_text)
 
+    # Save reading to CSV
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    with open(CSV_FILE, mode="a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([timestamp, temperature, humidity, soil_moisture, pump_status])
+
     # Repeat after 2 seconds
     root.after(2000, update_readings)
 
-# Start the GUI loop
+# Start GUI loop
 update_readings()
 root.mainloop()
 
 # Cleanup GPIO on exit
 GPIO.cleanup()
-if ser and ser.is_open:
-    ser.close()
