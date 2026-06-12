@@ -1,12 +1,13 @@
-# Hardware control
+# Raspberry Pi hardware and GPIO
 RPi.GPIO
-Adafruit_DHT
 gpiozero
-adafruit-circuitpython-ads1x15
+spidev
 
-# GUI
-tk   # tkinter is usually built-in, so no need to install via pip
+# DHT11 and OLED display
+adafruit-blinka
+adafruit-circuitpython-dht
+adafruit-circuitpython-ssd1306
+Pillow
 
-# Optional networking (if needed later)
+# Favoriot REST API
 requests
-paho-mqtt

@@ -1,1 +1,7 @@
 .venv/
+__pycache__/
+*.py[cod]
+
+.env
+plant_data.csv
+sensor_readings.csv
