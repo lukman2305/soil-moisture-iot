@@ -1,6 +1,6 @@
 # Raspberry Pi 400 Smart Plant Monitoring and Watering System
 
-This project is a hardware-based IoT system for smart agriculture. It reads plant environment data, controls a water pump automatically, logs sensor data for future machine learning work, and sends monitoring data to a Favoriot dashboard.
+This project is a hardware-based IoT system for smart agriculture. It reads plant environment data, predicts whether soil will become dry in the next 10 minutes, controls a water pump automatically, logs sensor data for future machine learning work, and shows monitoring data in a Streamlit dashboard. Favoriot sending remains optional for assignment compatibility.
 
 ## Hardware
 
@@ -11,7 +11,9 @@ This project is a hardware-based IoT system for smart agriculture. It reads plan
 - SSD1306 OLED I2C display, 128x64
 - 1-channel relay module
 - DC water pump
-- Favoriot IoT dashboard
+- Streamlit local dashboard
+- Optional Favoriot IoT dashboard
+- Optional Telegram notification bot
 
 ## Current Behavior
 
@@ -29,16 +31,21 @@ This project is a hardware-based IoT system for smart agriculture. It reads plan
 - Saves readings to `plant_data.csv`.
 - Sends data to Favoriot using REST API.
 - Samples, logs, displays, and uploads data every 10 minutes by default.
+- Predicts `Dry Soon` or `Not Dry Soon` using a Decision Tree model.
+- Shows risk notifications on Streamlit, OLED, and optional Telegram.
+- Supports simulation and one-cycle debug modes for testing without hardware.
 
 ## Favoriot Dashboard Fields
 
-The script sends this payload under the configured `device_developer_id`:
+Favoriot is optional. When configured, the script sends this payload under the configured `device_developer_id`:
 
 - `temperature`
 - `humidity`
 - `soil_value`
 - `soil_status`
 - `pump_status`
+- `ml_prediction`
+- `notification_status`
 
 ## CSV Columns
 
@@ -48,8 +55,14 @@ The script sends this payload under the configured `device_developer_id`:
 - `temperature`
 - `humidity`
 - `soil_value`
+- `previous_soil_value`
+- `moisture_change_rate`
 - `soil_status`
 - `pump_status`
+- `ml_prediction`
+- `dry_soon_label`
+- `notification_status`
+- `debug_status`
 
 ## Setup
 
@@ -98,10 +111,16 @@ DHT_PIN=D4
 SOIL_CHANNEL=0
 RELAY_PIN=18
 READ_INTERVAL_SECONDS=600
+ML_CONTROL_MODE=recommend
+DEBUG_MODE=false
+SIMULATION_MODE=false
+RUN_ONCE=false
 SOIL_DRY_RAW=1.0
 SOIL_WET_RAW=0.0
 DRY_PERCENT=30
 WET_PERCENT=70
+TELEGRAM_ENABLED=false
+NOTIFICATION_COOLDOWN_SECONDS=1800
 ```
 
 If your DHT11 data wire is moved from GPIO4 to GPIO17, change:
@@ -120,13 +139,80 @@ Stop with `Ctrl+C`. The script turns the pump OFF, clears GPIO, exits the DHT se
 
 The default sampling interval is 10 minutes. To test faster during a demo, temporarily set `READ_INTERVAL_SECONDS=30` or another smaller value in `.env`.
 
+Run one debug cycle without Raspberry Pi hardware:
+
+```bash
+SIMULATION_MODE=true RUN_ONCE=true python3 full_monitor.py
+```
+
+Run the Streamlit dashboard:
+
+```bash
+streamlit run streamlit_app.py
+```
+
+## Machine Learning
+
+The model predicts:
+
+```text
+Will soil become dry in the next 10 minutes?
+```
+
+Inputs:
+
+- current soil moisture
+- temperature
+- humidity
+- previous soil moisture
+- moisture change rate
+- pump status
+
+Output:
+
+- `Dry Soon`
+- `Not Dry Soon`
+
+The first version uses a small bootstrap dataset if no training CSV exists. To train from Kaggle or real Raspberry Pi data, place a canonical CSV at:
+
+```text
+data/training_smart_agriculture.csv
+```
+
+Required columns:
+
+```text
+soil_value,temperature,humidity,previous_soil_value,moisture_change_rate,pump_status,dry_soon_label
+```
+
+For safety, `ML_CONTROL_MODE=recommend` is the default. Set `ML_CONTROL_MODE=control` only when you want the ML prediction to turn the pump ON early.
+
+## Notifications and Debug
+
+Telegram settings are optional and must stay in `.env`:
+
+```bash
+TELEGRAM_ENABLED=true
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+NOTIFICATION_COOLDOWN_SECONDS=1800
+```
+
+Telegram sends at most one repeated warning per risk type every 30 minutes.
+
+The Streamlit Debug tab shows CSV status, model status, configuration status, and wiring hints for DHT11, MCP3008, relay, I2C, and SPI.
+
 ## Project Structure
 
 - `full_monitor.py`: Raspberry Pi hardware loop.
 - `plant_monitor/logic.py`: soil percentage, classification, pump decision, and Favoriot config logic.
 - `plant_monitor/app.py`: CSV writing, Favoriot payload/sending, relay output helper, OLED text formatting.
 - `plant_monitor/env.py`: local `.env` loader.
+- `plant_monitor/ml.py`: Decision Tree training and dry-soon prediction helpers.
+- `plant_monitor/notifications.py`: risk detection and Telegram alerts.
+- `plant_monitor/debug.py`: startup diagnostics and reason-code logging.
 - `plant_monitor/settings.py`: environment-backed runtime settings.
+- `streamlit_app.py`: local monitoring dashboard.
 - `tests/`: unit tests for the non-hardware logic.
 
 ## Test

@@ -5,3 +5,6 @@ __pycache__/
 .env
 plant_data.csv
 sensor_readings.csv
+.telegram_state.json
+models/*.joblib
+data/*.csv

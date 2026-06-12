@@ -11,8 +11,14 @@ CSV_HEADER = [
     "temperature",
     "humidity",
     "soil_value",
+    "previous_soil_value",
+    "moisture_change_rate",
     "soil_status",
     "pump_status",
+    "ml_prediction",
+    "dry_soon_label",
+    "notification_status",
+    "debug_status",
 ]
 
 
@@ -22,8 +28,14 @@ class SensorReading:
     temperature: float
     humidity: float
     soil_value: float
-    soil_status: str
-    pump_status: str
+    previous_soil_value: float = None
+    moisture_change_rate: float = 0.0
+    soil_status: str = ""
+    pump_status: str = "OFF"
+    ml_prediction: str = "Unknown"
+    dry_soon_label: str = ""
+    notification_status: str = ""
+    debug_status: str = "OK"
 
 
 def ensure_csv_header(csv_path):
@@ -53,10 +65,34 @@ def write_csv_reading(csv_path, reading):
                 _csv_value(reading.temperature),
                 _csv_value(reading.humidity),
                 _csv_value(reading.soil_value),
+                _csv_value(reading.previous_soil_value),
+                _csv_value(reading.moisture_change_rate),
                 reading.soil_status,
                 reading.pump_status,
+                reading.ml_prediction,
+                reading.dry_soon_label,
+                reading.notification_status,
+                reading.debug_status,
             ]
         )
+
+
+def read_latest_soil_value(csv_path):
+    path = Path(csv_path)
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+
+    with path.open(newline="") as file:
+        rows = list(csv.DictReader(file))
+
+    for row in reversed(rows):
+        value = row.get("soil_value")
+        if value not in (None, ""):
+            try:
+                return float(value)
+            except ValueError:
+                continue
+    return None
 
 
 def build_favoriot_payload(device_developer_id, reading):
@@ -68,6 +104,8 @@ def build_favoriot_payload(device_developer_id, reading):
             "soil_value": round(reading.soil_value, 1),
             "soil_status": reading.soil_status,
             "pump_status": reading.pump_status,
+            "ml_prediction": reading.ml_prediction,
+            "notification_status": reading.notification_status,
         },
     }
 
@@ -115,5 +153,6 @@ def format_oled_lines(reading):
         lines.append(f"Humid: {reading.humidity}%")
 
     lines.append(f"Soil: {round(reading.soil_value, 1)}%")
-    lines.append(f"{reading.soil_status} P:{reading.pump_status}")
+    prediction = reading.ml_prediction if reading.ml_prediction != "Not Dry Soon" else "OK"
+    lines.append(f"ML:{prediction} P:{reading.pump_status}")
     return lines

@@ -41,8 +41,14 @@ class PlantMonitorAppTest(unittest.TestCase):
             temperature=29.0,
             humidity=72.0,
             soil_value=24.5,
+            previous_soil_value=30.0,
+            moisture_change_rate=-5.5,
             soil_status="DRY",
             pump_status="ON",
+            ml_prediction="Dry Soon",
+            dry_soon_label="Dry Soon",
+            notification_status="DRY,Dry Soon",
+            debug_status="OK",
         )
 
     def test_ensure_csv_header_creates_expected_assignment_columns(self):
@@ -66,7 +72,23 @@ class PlantMonitorAppTest(unittest.TestCase):
             with csv_path.open(newline="") as file:
                 rows = list(csv.reader(file))
 
-        self.assertEqual(rows[1], ["2026-06-12 10:30:00", "29.0", "72.0", "24.5", "DRY", "ON"])
+        self.assertEqual(
+            rows[1],
+            [
+                "2026-06-12 10:30:00",
+                "29.0",
+                "72.0",
+                "24.5",
+                "30.0",
+                "-5.5",
+                "DRY",
+                "ON",
+                "Dry Soon",
+                "Dry Soon",
+                "DRY,Dry Soon",
+                "OK",
+            ],
+        )
 
     def test_build_favoriot_payload_matches_dashboard_fields(self):
         payload = build_favoriot_payload("device-default@user", self.sample_reading())
@@ -80,6 +102,8 @@ class PlantMonitorAppTest(unittest.TestCase):
                 "soil_value": 24.5,
                 "soil_status": "DRY",
                 "pump_status": "ON",
+                "ml_prediction": "Dry Soon",
+                "notification_status": "DRY,Dry Soon",
             },
         )
 
@@ -128,7 +152,7 @@ class PlantMonitorAppTest(unittest.TestCase):
     def test_format_oled_lines_fits_core_status_data(self):
         lines = format_oled_lines(self.sample_reading())
 
-        self.assertEqual(lines, ["SMART PLANT", "Temp: 29.0 C", "Humid: 72.0%", "Soil: 24.5%", "DRY P:ON"])
+        self.assertEqual(lines, ["SMART PLANT", "Temp: 29.0 C", "Humid: 72.0%", "Soil: 24.5%", "ML:Dry Soon P:ON"])
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ import unittest
 from plant_monitor.logic import (
     FavoriotConfig,
     classify_soil,
+    decide_pump_status_with_ml,
     decide_pump_status,
     load_favoriot_config,
     raw_to_moisture_percent,
@@ -30,6 +31,12 @@ class PlantMonitorLogicTest(unittest.TestCase):
         self.assertEqual(decide_pump_status("DRY"), "ON")
         self.assertEqual(decide_pump_status("OPTIMAL"), "OFF")
         self.assertEqual(decide_pump_status("WET"), "OFF")
+
+    def test_decide_pump_status_with_ml_control_mode(self):
+        self.assertEqual(decide_pump_status_with_ml("DRY", "Not Dry Soon", "recommend"), "ON")
+        self.assertEqual(decide_pump_status_with_ml("OPTIMAL", "Dry Soon", "recommend"), "OFF")
+        self.assertEqual(decide_pump_status_with_ml("OPTIMAL", "Dry Soon", "control"), "ON")
+        self.assertEqual(decide_pump_status_with_ml("WET", "Dry Soon", "control"), "OFF")
 
     def test_load_favoriot_config_reads_env_without_hardcoded_secret(self):
         env = {
