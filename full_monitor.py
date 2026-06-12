@@ -104,6 +104,11 @@ def build_reading(dht, soil_sensor):
         dry_raw=SOIL_DRY_RAW,
         wet_raw=SOIL_WET_RAW,
     )
+    
+    # 2. Thresholding (Noise Floor) Data Filter
+    # If the reading is just tiny electrical noise below 5%, force it to absolute zero
+    if soil_value < 5.0:
+        soil_value = 0.0
         
     soil_status = classify_soil(
         soil_value,
