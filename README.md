@@ -2,6 +2,87 @@
 
 This project is a hardware-based IoT system for smart agriculture. It reads plant environment data, predicts whether soil will become dry in the next 10 minutes, controls a water pump automatically, logs sensor data for future machine learning work, and shows monitoring data in a Streamlit dashboard. Favoriot sending remains optional for assignment compatibility.
 
+## Simple Project Explanation
+
+This project is a smart plant watering system. The Raspberry Pi 400 reads the plant's environment using three main sensor values:
+
+- soil moisture
+- temperature
+- humidity
+
+A normal irrigation system only checks whether the soil is dry right now. If the soil is already dry, it turns on the pump. This project is stronger because it also uses machine learning to predict whether the soil is likely to become dry soon.
+
+In simple words:
+
+```text
+Normal system:
+Soil is dry now -> turn pump ON
+
+Our system:
+Soil is not dry yet, but temperature is high, humidity is low, and moisture is dropping -> predict Dry Soon
+```
+
+The goal is to water the plant before plant stress happens, instead of waiting until the soil is already too dry.
+
+## Whole System Flow
+
+```text
+Sensors
+  -> Raspberry Pi 400
+  -> clean and process readings
+  -> calculate soil condition and moisture trend
+  -> machine learning predicts Dry Soon or Not Dry Soon
+  -> pump decision is made
+  -> OLED display updates
+  -> CSV file saves data
+  -> Streamlit dashboard shows charts and alerts
+  -> optional Telegram/Favoriot notification is sent
+```
+
+## What Each Part Does
+
+- **DHT11 sensor** reads temperature and humidity.
+- **Soil moisture sensor** reads how wet or dry the soil is.
+- **MCP3008 ADC** converts the soil sensor's analog value into a digital value the Raspberry Pi can read.
+- **Raspberry Pi 400** runs the Python program, processes readings, predicts dryness, controls the pump, and saves data.
+- **Relay module** switches the water pump ON or OFF.
+- **OLED display** shows the latest plant status beside the hardware.
+- **Streamlit dashboard** shows live status, charts, recent readings, alerts, and a debug tab.
+- **Machine learning model** predicts whether the soil will become dry in the next 10 minutes.
+- **Telegram notification** can send warnings to a phone when risk is detected.
+- **Favoriot** is optional and can still receive IoT data if required for the assignment.
+
+## Main Decision Logic
+
+The system still keeps a safe rule-based backup:
+
+```text
+If soil is DRY -> pump ON
+If soil is WET -> pump OFF
+```
+
+Machine learning adds predictive behavior:
+
+```text
+If soil is OPTIMAL but ML predicts Dry Soon -> warn user
+If ML_CONTROL_MODE=control -> pump can turn ON early
+If ML_CONTROL_MODE=recommend -> show recommendation only
+```
+
+The default setting is safe:
+
+```text
+ML_CONTROL_MODE=recommend
+```
+
+This means ML will warn or recommend, but it will not control the pump early unless the user enables control mode.
+
+## Demo Explanation
+
+For presentation, explain it like this:
+
+> This project monitors soil moisture, temperature, and humidity using Raspberry Pi 400. A threshold system controls the pump when the soil is already dry. On top of that, a machine learning model predicts whether the soil will become dry in the next 10 minutes using the current moisture, previous moisture, moisture change rate, temperature, humidity, and pump status. The result is shown on an OLED display and a Streamlit dashboard. If risk is detected, the system can show alerts and optionally send Telegram notifications.
+
 ## Hardware
 
 - Raspberry Pi 400
