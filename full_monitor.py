@@ -73,20 +73,38 @@ def show_oled(oled, image, draw, font, reading):
 
 
 def read_dht11(dht):
-    try:
-        return dht.temperature, dht.humidity
-    except RuntimeError as exc:
-        print(f"DHT11 reading error: {exc}")
-        return None, None
+    # Try up to 5 times to bypass Linux microsecond interruptions
+    for _ in range(5):
+        try:
+            return dht.temperature, dht.humidity
+        except RuntimeError:
+            time.sleep(0.5)
+            continue
+            
+    print("DHT11 reading error after 5 retries")
+    return None, None
 
+def read_soil_smoothed(soil_sensor, num_samples=10, delay=0.05):
+    # 1. Smoothing / Averaging Data Filter
+    samples = []
+    for _ in range(num_samples):
+        samples.append(soil_sensor.value)
+        time.sleep(delay)
+    return sum(samples) / len(samples)
 
 def build_reading(dht, soil_sensor):
     temperature, humidity = read_dht11(dht)
+    
+    # Get the smoothed analog reading
+    avg_raw_soil = read_soil_smoothed(soil_sensor)
+    
+    # Convert the smoothed reading to a percentage
     soil_value = raw_to_moisture_percent(
-        soil_sensor.value,
+        avg_raw_soil,
         dry_raw=SOIL_DRY_RAW,
         wet_raw=SOIL_WET_RAW,
     )
+        
     soil_status = classify_soil(
         soil_value,
         dry_threshold=DRY_PERCENT,
@@ -94,7 +112,7 @@ def build_reading(dht, soil_sensor):
     )
     pump_status = decide_pump_status(soil_status)
 
-    return SensorReading(
+    reading = SensorReading(
         timestamp=datetime.now(),
         temperature=temperature,
         humidity=humidity,
@@ -102,6 +120,9 @@ def build_reading(dht, soil_sensor):
         soil_status=soil_status,
         pump_status=pump_status,
     )
+    
+    # Return both the formatted reading object and the raw ADC value
+    return reading, avg_raw_soil
 
 
 def cleanup(dht, oled=None):
