@@ -1,97 +1,164 @@
+import os
 import time
-import csv
-import Adafruit_DHT
-import RPi.GPIO as GPIO
-from tkinter import Tk, Label
-import busio
-import digitalio
+from datetime import datetime
+from pathlib import Path
+
+import adafruit_dht
+import adafruit_ssd1306
 import board
-from adafruit_mcp3xxx.mcp3008 import MCP3008
-from adafruit_mcp3xxx.analog_in import AnalogIn
+import busio
+import RPi.GPIO as GPIO
+from gpiozero import MCP3008
+from PIL import Image, ImageDraw, ImageFont
 
-# -----------------------------
-# GPIO Setup
-# -----------------------------
-PUMP_PIN = 27
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(PUMP_PIN, GPIO.OUT)
-GPIO.output(PUMP_PIN, GPIO.LOW)  # Pump OFF initially
+from plant_monitor.app import (
+    SensorReading,
+    ensure_csv_header,
+    format_oled_lines,
+    send_to_favoriot,
+    set_pump_output,
+    write_csv_reading,
+)
+from plant_monitor.env import load_env_file
+from plant_monitor.logic import (
+    classify_soil,
+    decide_pump_status,
+    load_favoriot_config,
+    raw_to_moisture_percent,
+)
+from plant_monitor.settings import read_interval_seconds
 
-# DHT11 Sensor
-DHT_SENSOR = Adafruit_DHT.DHT11
-DHT_PIN = 4
 
-# -----------------------------
-# MCP3008 Setup for Soil Moisture
-# -----------------------------
-spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
-cs = digitalio.DigitalInOut(board.D8)  # CE0
-mcp = MCP3008(spi, cs)
-soil_channel = AnalogIn(mcp, 0)
+BASE_DIR = Path(__file__).resolve().parent
+load_env_file(BASE_DIR / ".env")
 
-# Calibration
-DRY_VALUE = 35000   # ADC value when dry
-WET_VALUE = 15000   # ADC value when wet
+CSV_FILE = Path(os.getenv("CSV_FILE", str(BASE_DIR / "plant_data.csv")))
+RELAY_PIN = int(os.getenv("RELAY_PIN", "18"))
+SOIL_CHANNEL = int(os.getenv("SOIL_CHANNEL", "0"))
+DHT_PIN = os.getenv("DHT_PIN", "D4").upper()
+READ_INTERVAL_SECONDS = read_interval_seconds()
 
-# -----------------------------
-# CSV Logging Setup
-# -----------------------------
-CSV_FILE = "sensor_readings.csv"
+# For most analog soil sensors: raw MCP3008 value is high when dry and low when wet.
+SOIL_DRY_RAW = float(os.getenv("SOIL_DRY_RAW", "1.0"))
+SOIL_WET_RAW = float(os.getenv("SOIL_WET_RAW", "0.0"))
+DRY_PERCENT = float(os.getenv("DRY_PERCENT", "30"))
+WET_PERCENT = float(os.getenv("WET_PERCENT", "70"))
 
-# Create CSV with headers if not exist
-with open(CSV_FILE, mode="w", newline="") as f:
-    writer = csv.writer(f)
-    writer.writerow(["Timestamp", "Temperature_C", "Humidity_%", "Soil_Moisture_%", "Pump_Status"])
 
-# -----------------------------
-# Tkinter GUI Setup
-# -----------------------------
-root = Tk()
-root.title("Smart Agriculture Monitor")
-root.geometry("400x200")
-label = Label(root, text="", font=("Arial", 16))
-label.pack(pady=20)
+def board_pin(pin_name):
+    try:
+        return getattr(board, pin_name)
+    except AttributeError as exc:
+        raise ValueError(f"Invalid DHT_PIN '{pin_name}'. Use D4 or D17, for example.") from exc
 
-def update_readings():
-    # Read DHT11
-    humidity, temperature = Adafruit_DHT.read_retry(DHT_SENSOR, DHT_PIN)
-    if humidity is None or temperature is None:
-        humidity, temperature = 0, 0
 
-    # Read Soil Moisture from MCP3008
-    raw_value = soil_channel.value
-    raw_value = min(max(raw_value, WET_VALUE), DRY_VALUE)
-    soil_moisture = int((DRY_VALUE - raw_value) / (DRY_VALUE - WET_VALUE) * 100)
+def setup_oled():
+    i2c = busio.I2C(board.SCL, board.SDA)
+    oled = adafruit_ssd1306.SSD1306_I2C(128, 64, i2c, addr=0x3C)
+    oled.fill(0)
+    oled.show()
 
-    # Pump logic
-    if soil_moisture < 40:
-        GPIO.output(PUMP_PIN, GPIO.HIGH)
-        pump_status = "ON"
-    else:
-        GPIO.output(PUMP_PIN, GPIO.LOW)
-        pump_status = "OFF"
+    image = Image.new("1", (oled.width, oled.height))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    return oled, image, draw, font
 
-    # Update GUI
-    label_text = (
-        f"Temp: {temperature:.1f}°C\n"
-        f"Humidity: {humidity:.1f}%\n"
-        f"Soil Moisture: {soil_moisture}%\n"
-        f"Pump Status: {pump_status}"
+
+def show_oled(oled, image, draw, font, reading):
+    draw.rectangle((0, 0, oled.width, oled.height), outline=0, fill=0)
+    for index, line in enumerate(format_oled_lines(reading)):
+        draw.text((0, index * 12), line, font=font, fill=255)
+    oled.image(image)
+    oled.show()
+
+
+def read_dht11(dht):
+    try:
+        return dht.temperature, dht.humidity
+    except RuntimeError as exc:
+        print(f"DHT11 reading error: {exc}")
+        return None, None
+
+
+def build_reading(dht, soil_sensor):
+    temperature, humidity = read_dht11(dht)
+    soil_value = raw_to_moisture_percent(
+        soil_sensor.value,
+        dry_raw=SOIL_DRY_RAW,
+        wet_raw=SOIL_WET_RAW,
     )
-    label.config(text=label_text)
+    soil_status = classify_soil(
+        soil_value,
+        dry_threshold=DRY_PERCENT,
+        wet_threshold=WET_PERCENT,
+    )
+    pump_status = decide_pump_status(soil_status)
 
-    # Save reading to CSV
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    with open(CSV_FILE, mode="a", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([timestamp, temperature, humidity, soil_moisture, pump_status])
+    return SensorReading(
+        timestamp=datetime.now(),
+        temperature=temperature,
+        humidity=humidity,
+        soil_value=soil_value,
+        soil_status=soil_status,
+        pump_status=pump_status,
+    )
 
-    # Repeat after 2 seconds
-    root.after(2000, update_readings)
 
-# Start GUI loop
-update_readings()
-root.mainloop()
+def cleanup(dht, oled=None):
+    print("Stopping system...")
+    GPIO.output(RELAY_PIN, GPIO.HIGH)
+    GPIO.cleanup()
+    dht.exit()
+    if oled:
+        oled.fill(0)
+        oled.show()
 
-# Cleanup GPIO on exit
-GPIO.cleanup()
+
+def main():
+    print("Smart plant system started. Press Ctrl+C to stop.")
+    print(f"CSV file: {CSV_FILE}")
+    print(f"DHT11 pin: board.{DHT_PIN}, soil channel: CH{SOIL_CHANNEL}, relay GPIO: {RELAY_PIN}")
+
+    ensure_csv_header(CSV_FILE)
+    favoriot_config = load_favoriot_config()
+
+    dht = adafruit_dht.DHT11(board_pin(DHT_PIN))
+    soil_sensor = MCP3008(channel=SOIL_CHANNEL)
+    oled, image, draw, font = setup_oled()
+
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(RELAY_PIN, GPIO.OUT)
+    GPIO.output(RELAY_PIN, GPIO.HIGH)
+
+    try:
+        while True:
+            try:
+                reading = build_reading(dht, soil_sensor)
+                set_pump_output(GPIO, RELAY_PIN, reading.pump_status)
+                write_csv_reading(CSV_FILE, reading)
+                send_to_favoriot(favoriot_config, reading, logger=print)
+                show_oled(oled, image, draw, font, reading)
+
+                print("----------------------")
+                print("Time:", reading.timestamp.strftime("%Y-%m-%d %H:%M:%S"))
+                print("Soil moisture:", round(reading.soil_value, 1), "%")
+                print("Soil status:", reading.soil_status)
+                print("Pump:", reading.pump_status)
+                if reading.temperature is None or reading.humidity is None:
+                    print("DHT11 reading error")
+                else:
+                    print("Temp:", reading.temperature, "C")
+                    print("Humidity:", reading.humidity, "%")
+
+            except Exception as exc:
+                print(f"Loop error: {exc}")
+                GPIO.output(RELAY_PIN, GPIO.HIGH)
+
+            time.sleep(READ_INTERVAL_SECONDS)
+
+    except KeyboardInterrupt:
+        cleanup(dht, oled)
+
+
+if __name__ == "__main__":
+    main()

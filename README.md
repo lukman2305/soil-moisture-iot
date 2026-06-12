@@ -1,75 +1,138 @@
-# Soil Moisture IoT Project
+# Raspberry Pi 400 Smart Plant Monitoring and Watering System
 
-## Project Overview
-This project is part of the SRTA 3353 Machine Learning for IoT course (Academic Session 2025/2026).  
-The aim is to design and implement a **hardware-based IoT solution** for **smart agriculture**.  
-The system measures **soil moisture** using an ESP32 sensor and communicates the data to a **Raspberry Pi 400** via **serial GPIO (RX/TX)**.  
+This project is a hardware-based IoT system for smart agriculture. It reads plant environment data, controls a water pump automatically, logs sensor data for future machine learning work, and sends monitoring data to a Favoriot dashboard.
 
-This project demonstrates integration between sensing, processing, decision-making, and actuator control for automated irrigation.
+## Hardware
 
----
+- Raspberry Pi 400
+- DHT11 temperature and humidity sensor
+- Soil moisture sensor analog output AO
+- MCP3008 ADC for soil sensor analog-to-digital conversion
+- SSD1306 OLED I2C display, 128x64
+- 1-channel relay module
+- DC water pump
+- Favoriot IoT dashboard
 
-## Team Roles
+## Current Behavior
 
-| Student | Role | Responsibilities |
-|---------|------|----------------|
-| Student 1 | Project Coordinator / Requirements Analyst | Define problem, scope, objectives, coordinate tasks, maintain contribution log |
-| Student 2 | Hardware Assembly / Sensor Integration | Wire sensors and actuators, verify hardware functionality |
-| Student 3 | Firmware / Embedded System Programming | Develop Raspberry Pi firmware, implement sensor acquisition and actuator control, integrate communication protocols (MQTT/HTTP/Wi-Fi/Bluetooth) |
-| Student 4 | Data Processing & Intelligence | Implement preprocessing, filtering, threshold logic, ML-based decision-making |
-| Student 5 | Dashboard & Visualization | Configure Favoriot dashboard, create data visualization, implement alerts and monitoring |
-| Student 6 | Testing & Documentation | Test system, prepare demo scenarios, collect evidence, compile report |
+- Reads temperature and humidity from DHT11.
+- Reads soil moisture AO through MCP3008 channel 0.
+- Converts soil reading to a moisture percentage where `0%` is very dry and `100%` is very wet.
+- Classifies soil condition:
+  - `< 30%`: `DRY`
+  - `30%` to `70%`: `OPTIMAL`
+  - `> 70%`: `WET`
+- Controls an active-LOW relay on GPIO18:
+  - `GPIO.LOW`: pump ON
+  - `GPIO.HIGH`: pump OFF
+- Shows live data on the OLED display.
+- Saves readings to `plant_data.csv`.
+- Sends data to Favoriot using REST API.
+- Samples, logs, displays, and uploads data every 10 minutes by default.
 
----
+## Favoriot Dashboard Fields
 
-## Hardware Components
-- **ESP32** → Reads soil moisture sensor  
-- **Soil Moisture Hygrometer** → Measures soil water content  
-- **Raspberry Pi 400** → Central processing unit and serial communication  
-- **Relay Module + 5V Pump** → Actuator for irrigation  
-- **Display (HDMI)** → Shows live readings  
-- **Jumper wires & cables** → Connect all components  
+The script sends this payload under the configured `device_developer_id`:
 
----
+- `temperature`
+- `humidity`
+- `soil_value`
+- `soil_status`
+- `pump_status`
 
-## Software Components
-- **Python 3** → Main programming language  
-- **Libraries**:
-  - `pyserial` → Serial communication with ESP32  
-  - `RPi.GPIO` → Raspberry Pi GPIO control (for relay/pump)  
-  - `Adafruit_DHT` → Temperature & humidity sensor (optional for future expansion)  
-  - `requests` → HTTP communication  
-  - `paho-mqtt` → MQTT communication for dashboard  
-- **Git & GitHub** → Version control and collaboration  
-- **Virtual Environment (`venv`)** → Isolate Python dependencies  
+## CSV Columns
 
----
+`plant_data.csv` uses these columns:
 
-## Project Workflow
+- `timestamp`
+- `temperature`
+- `humidity`
+- `soil_value`
+- `soil_status`
+- `pump_status`
 
-1. **Select Problem & Sensors**
-   - Smart Agriculture: monitor soil moisture and automate irrigation
-2. **Build Hardware Prototype**
-   - ESP32 wired to soil moisture sensor
-   - Relay module connected to 5V pump
-3. **Develop Firmware**
-   - Read ESP32 serial data on Raspberry Pi
-   - Implement actuator control logic
-   - Integrate communication protocols
-4. **Test Sensors**
-   - Verify soil moisture readings in simulation or real soil
-   - Ensure pump triggers correctly
-5. **Implement Dashboard / Alerts**
-   - Optional: MQTT / HTTP to monitor readings remotely
-6. **Document Contribution**
-   - Keep logs for each student’s tasks
-   - Include screenshots, diagrams, and test outputs
+## Setup
 
----
+Install Raspberry Pi OS packages needed for GPIO, I2C, SPI, and DHT support first if your Pi does not already have them.
 
-## Installation Instructions
+Create and activate a virtual environment:
 
-1. **Clone repository**
 ```bash
-git clone https://github.com/<username>/soil-moisture-iot.git
-cd soil-moisture-iot
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Enable Raspberry Pi interfaces:
+
+```bash
+sudo raspi-config
+```
+
+Enable:
+
+- I2C for the OLED display
+- SPI for MCP3008
+
+## Configuration
+
+Copy the example environment file:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and fill in your real Favoriot values:
+
+```bash
+FAVORIOT_API_KEY=your_real_api_key
+FAVORIOT_DEVICE_DEVELOPER_ID=your_device_developer_id
+```
+
+Do not commit `.env` to GitHub. It is ignored by `.gitignore`.
+
+Useful hardware settings in `.env`:
+
+```bash
+DHT_PIN=D4
+SOIL_CHANNEL=0
+RELAY_PIN=18
+READ_INTERVAL_SECONDS=600
+SOIL_DRY_RAW=1.0
+SOIL_WET_RAW=0.0
+DRY_PERCENT=30
+WET_PERCENT=70
+```
+
+If your DHT11 data wire is moved from GPIO4 to GPIO17, change:
+
+```bash
+DHT_PIN=D17
+```
+
+## Run
+
+```bash
+python3 full_monitor.py
+```
+
+Stop with `Ctrl+C`. The script turns the pump OFF, clears GPIO, exits the DHT sensor cleanly, and clears the OLED.
+
+The default sampling interval is 10 minutes. To test faster during a demo, temporarily set `READ_INTERVAL_SECONDS=30` or another smaller value in `.env`.
+
+## Project Structure
+
+- `full_monitor.py`: Raspberry Pi hardware loop.
+- `plant_monitor/logic.py`: soil percentage, classification, pump decision, and Favoriot config logic.
+- `plant_monitor/app.py`: CSV writing, Favoriot payload/sending, relay output helper, OLED text formatting.
+- `plant_monitor/env.py`: local `.env` loader.
+- `plant_monitor/settings.py`: environment-backed runtime settings.
+- `tests/`: unit tests for the non-hardware logic.
+
+## Test
+
+The unit tests can run on a normal computer because they avoid Raspberry Pi hardware imports.
+
+```bash
+python -m unittest discover -s tests
+```
