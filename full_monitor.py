@@ -159,7 +159,9 @@ def main():
     try:
         while True:
             try:
-                reading = build_reading(dht, soil_sensor)
+                # Unpack BOTH the reading object and the raw_soil value
+                reading, raw_soil = build_reading(dht, soil_sensor)
+                
                 set_pump_output(GPIO, RELAY_PIN, reading.pump_status)
                 write_csv_reading(CSV_FILE, reading)
                 send_to_favoriot(favoriot_config, reading, logger=print)
@@ -167,6 +169,10 @@ def main():
 
                 print("----------------------")
                 print("Time:", reading.timestamp.strftime("%Y-%m-%d %H:%M:%S"))
+                
+                # Print the raw analog value
+                print("Raw soil ADC:", round(raw_soil, 3))
+                
                 print("Soil moisture:", round(reading.soil_value, 1), "%")
                 print("Soil status:", reading.soil_status)
                 print("Pump:", reading.pump_status)
