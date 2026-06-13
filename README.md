@@ -254,19 +254,43 @@ Output:
 - `Dry Soon`
 - `Not Dry Soon`
 
-The first version uses a small bootstrap dataset if no training CSV exists. To train from Kaggle or real Raspberry Pi data, place a canonical CSV at:
+The first training source is the Kaggle smart agriculture CSV you uploaded locally:
 
 ```text
 data/training_smart_agriculture.csv
 ```
 
-Required columns:
+The code now supports the raw Kaggle columns:
+
+```text
+crop ID,soil_type,Seedling Stage,MOI,temp,humidity,result
+```
+
+For this project, the Kaggle columns are converted like this:
+
+- `MOI` -> `soil_value`
+- `temp` -> `temperature`
+- `humidity` -> `humidity`
+- `result=0` -> `Not Dry Soon`
+- `result=1` or `result=2` -> `Dry Soon`
+
+Because the Kaggle file is not your real Raspberry Pi time series, `previous_soil_value` and `moisture_change_rate` are estimated from the previous row within the same crop, soil type, and seedling stage group. This makes Kaggle useful as a starter dataset, but your own `plant_data.csv` is still the stronger final dataset.
+
+The canonical training format is also supported:
 
 ```text
 soil_value,temperature,humidity,previous_soil_value,moisture_change_rate,pump_status,dry_soon_label
 ```
 
-For safety, `ML_CONTROL_MODE=recommend` is the default. Set `ML_CONTROL_MODE=control` only when you want the ML prediction to turn the pump ON early.
+After collecting real sensor data for some time, you can retrain from your own CSV by changing `.env`:
+
+```bash
+TRAINING_CSV_FILE=plant_data.csv
+```
+
+If `dry_soon_label` is blank in real data, the trainer labels each row using the next sensor row. Since the default sampling time is 10 minutes, the next row means "soil condition in the next 10 minutes." If the next soil value is below `30%`, the label becomes `Dry Soon`; otherwise it becomes `Not Dry Soon`.
+
+For safety, `ML_CONTROL_MODE=recommend` is the default. Set `ML_CONTROL_MODE=control` only when you want the ML prediction to turn the pump ON early. If a saved model file already exists and you want to force retraining, remove `models/dryness_model.joblib` or set `MODEL_PATH` to a new file name.
 
 ## Notifications and Debug
 

@@ -18,6 +18,9 @@ FEATURE_COLUMNS = [
     "pump_status_code",
 ]
 LABEL_COLUMN = "dry_soon_label"
+KAGGLE_REQUIRED_COLUMNS = ["MOI", "temp", "humidity", "result"]
+KAGGLE_GROUP_COLUMNS = ["crop ID", "soil_type", "Seedling Stage"]
+DEFAULT_DRY_PERCENT = 30.0
 
 
 @dataclass
@@ -54,8 +57,92 @@ def bootstrap_training_frame():
     return pd.DataFrame(rows, columns=FEATURE_COLUMNS + [LABEL_COLUMN])
 
 
-def _normalize_training_frame(frame):
+def _has_kaggle_schema(frame):
+    return all(column in frame.columns for column in KAGGLE_REQUIRED_COLUMNS)
+
+
+def _normalize_kaggle_frame(frame):
+    source = frame.copy()
+    source["soil_value"] = pd.to_numeric(source["MOI"], errors="coerce")
+    source["temperature"] = pd.to_numeric(source["temp"], errors="coerce")
+    source["humidity"] = pd.to_numeric(source["humidity"], errors="coerce")
+
+    group_columns = [column for column in KAGGLE_GROUP_COLUMNS if column in source.columns]
+    if group_columns:
+        previous_soil = source.groupby(group_columns)["soil_value"].shift(1)
+    else:
+        previous_soil = source["soil_value"].shift(1)
+
+    normalized = pd.DataFrame()
+    normalized["soil_value"] = source["soil_value"]
+    normalized["temperature"] = source["temperature"]
+    normalized["humidity"] = source["humidity"]
+    normalized["previous_soil_value"] = previous_soil.fillna(source["soil_value"])
+    normalized["moisture_change_rate"] = (
+        normalized["soil_value"] - normalized["previous_soil_value"]
+    ).round(1)
+    normalized["pump_status_code"] = (normalized["soil_value"] < 30).astype(int)
+    normalized[LABEL_COLUMN] = pd.to_numeric(source["result"], errors="coerce").map(
+        {
+            0: NOT_DRY_SOON,
+            1: DRY_SOON,
+            2: DRY_SOON,
+        }
+    )
+    return normalized[FEATURE_COLUMNS + [LABEL_COLUMN]].dropna()
+
+
+def _labels_are_empty(normalized):
+    if LABEL_COLUMN not in normalized.columns:
+        return True
+    labels = normalized[LABEL_COLUMN].astype("string").fillna("").str.strip()
+    return labels.eq("").all()
+
+
+def _derive_next_sample_labels(normalized):
+    if "soil_value" not in normalized.columns:
+        return normalized
+
+    if "timestamp" in normalized.columns:
+        normalized = normalized.sort_values("timestamp").reset_index(drop=True)
+
+    soil_value = pd.to_numeric(normalized["soil_value"], errors="coerce")
+    future_soil_value = soil_value.shift(-1)
+    normalized[LABEL_COLUMN] = future_soil_value.apply(_future_soil_label)
+    return normalized
+
+
+def _future_soil_label(value):
+    if pd.isna(value):
+        return pd.NA
+    return DRY_SOON if value < DEFAULT_DRY_PERCENT else NOT_DRY_SOON
+
+
+def _derive_missing_trend_features(normalized):
+    if "soil_value" not in normalized.columns:
+        return normalized
+
+    soil_value = pd.to_numeric(normalized["soil_value"], errors="coerce")
+    if "previous_soil_value" not in normalized.columns:
+        normalized["previous_soil_value"] = soil_value.shift(1).fillna(soil_value)
+    if "moisture_change_rate" not in normalized.columns:
+        previous_soil_value = pd.to_numeric(
+            normalized["previous_soil_value"],
+            errors="coerce",
+        )
+        normalized["moisture_change_rate"] = (soil_value - previous_soil_value).round(1)
+    return normalized
+
+
+def normalize_training_frame(frame):
+    if _has_kaggle_schema(frame):
+        return _normalize_kaggle_frame(frame)
+
     normalized = frame.copy()
+    normalized = _derive_missing_trend_features(normalized)
+    if _labels_are_empty(normalized):
+        normalized = _derive_next_sample_labels(normalized)
+
     if "pump_status" in normalized.columns and "pump_status_code" not in normalized.columns:
         normalized["pump_status_code"] = normalized["pump_status"].map({"ON": 1, "OFF": 0}).fillna(0)
 
@@ -63,11 +150,15 @@ def _normalize_training_frame(frame):
     if missing:
         raise ValueError("Training data missing columns: " + ", ".join(missing))
 
+    for column in FEATURE_COLUMNS:
+        normalized[column] = pd.to_numeric(normalized[column], errors="coerce")
+    normalized[LABEL_COLUMN] = normalized[LABEL_COLUMN].astype("string").str.strip()
+
     return normalized[FEATURE_COLUMNS + [LABEL_COLUMN]].dropna()
 
 
 def _train_from_frame(frame, status_code):
-    training = _normalize_training_frame(frame)
+    training = normalize_training_frame(frame)
     model = DecisionTreeClassifier(max_depth=4, random_state=42)
     model.fit(training[FEATURE_COLUMNS], training[LABEL_COLUMN])
     labels = sorted(training[LABEL_COLUMN].unique().tolist())
