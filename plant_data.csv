@@ -1,0 +1,3 @@
+timestamp,temperature,humidity,soil_value,previous_soil_value,moisture_change_rate,soil_status,pump_status,ml_prediction,dry_soon_label,notification_status,debug_status
+2026-06-14 01:11:24,32.0,55.0,45.0,,0.0,OPTIMAL,OFF,Dry Soon,,Dry Soon;TELEGRAM_SKIPPED,OK
+2026-06-14 02:36:09,32.0,55.0,45.0,45.0,0.0,OPTIMAL,OFF,Dry Soon,,Dry Soon;TELEGRAM_SKIPPED,OK
