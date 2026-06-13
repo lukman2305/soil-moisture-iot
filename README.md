@@ -83,6 +83,12 @@ For presentation, explain it like this:
 
 > This project monitors soil moisture, temperature, and humidity using Raspberry Pi 400. A threshold system controls the pump when the soil is already dry. On top of that, a machine learning model predicts whether the soil will become dry in the next 10 minutes using the current moisture, previous moisture, moisture change rate, temperature, humidity, and pump status. The result is shown on an OLED display and a Streamlit dashboard. If risk is detected, the system can show alerts and optionally send Telegram notifications.
 
+For a file-by-file code explanation and Telegram troubleshooting guide, read:
+
+```text
+CODE_EXPLANATION.md
+```
+
 ## Hardware
 
 - Raspberry Pi 400
@@ -304,6 +310,23 @@ NOTIFICATION_COOLDOWN_SECONDS=1800
 ```
 
 Telegram sends at most one repeated warning per risk type every 30 minutes.
+
+Telegram alerts are sent by `full_monitor.py`, not by the Streamlit dashboard. Streamlit only shows the latest alert status from `plant_data.csv`.
+
+Telegram alert triggers:
+
+- `Dry Soon`: the ML model predicts future dryness.
+- `DRY`: soil moisture is below the dry threshold.
+- `WET`: soil moisture is above the wet threshold.
+- `DHT Missing`: temperature or humidity failed to read.
+
+Telegram status is saved into the `notification_status` CSV column. Common values are:
+
+- `NO_RISK`
+- `TELEGRAM_SKIPPED`
+- `TELEGRAM_SENT:Dry Soon`
+- `TELEGRAM_COOLDOWN:Dry Soon`
+- `TELEGRAM_ERROR:<status_code>`
 
 The Streamlit Debug tab shows CSV status, model status, configuration status, and wiring hints for DHT11, MCP3008, relay, I2C, and SPI.
 
