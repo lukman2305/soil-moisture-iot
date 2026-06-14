@@ -574,3 +574,385 @@ Say:
 Say:
 
 > Kaggle data is used as a starter dataset to train the first model before enough real sensor data is collected. During operation, the Raspberry Pi collects real data into `plant_data.csv`. Later, the model can be retrained using this real data so the predictions better match the actual plant environment.
+
+## 26. FAQ From Common Questions
+
+### Does the project currently have a saved model?
+
+Yes. A saved model file is included:
+
+```text
+models/dryness_model.joblib
+```
+
+When this file exists, `full_monitor.py` loads it at startup.
+
+Expected terminal output:
+
+```text
+ML model: MODEL_LOADED
+```
+
+If the model file is removed, the system trains from the CSV selected by `TRAINING_CSV_FILE`.
+
+### When does the model train?
+
+The model trains or loads when `full_monitor.py` starts.
+
+It does not train every 10 minutes.
+
+```text
+Startup -> load/train model
+Every cycle -> use model to predict
+```
+
+### Does `full_monitor.py` only train the model?
+
+No. `full_monitor.py` runs the complete system:
+
+```text
+load/train model
+read sensors
+process sensor values
+predict Dry Soon / Not Dry Soon
+control pump
+save CSV
+update OLED
+send Telegram/Favoriot if configured
+```
+
+### Which data is used if both Kaggle data and real data exist?
+
+The code uses one training CSV at a time.
+
+This setting controls it:
+
+```bash
+TRAINING_CSV_FILE=data/training_smart_agriculture.csv
+```
+
+This means Kaggle data is used.
+
+If changed to:
+
+```bash
+TRAINING_CSV_FILE=plant_data.csv
+```
+
+then real collected data is used.
+
+However, if `models/dryness_model.joblib` exists, the saved model is loaded first.
+
+### Does the model retrain automatically using real-time data?
+
+No.
+
+The real-time sensor readings are saved into `plant_data.csv`. Later, the model can be retrained using that file.
+
+Correct explanation:
+
+```text
+Kaggle data trains the first model.
+Real-time sensor readings are used for prediction.
+Real-time readings are saved into plant_data.csv.
+Later, plant_data.csv can be used for retraining.
+```
+
+### Why can `ml_prediction` be `Unknown`?
+
+`Unknown` appears when important sensor data is missing.
+
+Example:
+
+```text
+DHT11 temperature missing
+DHT11 humidity missing
+```
+
+The system does not guess. It returns:
+
+```text
+ml_prediction = Unknown
+```
+
+This is safer for hardware because missing data may mean sensor or wiring failure.
+
+### How is `soil_status` decided?
+
+The current soil moisture percentage is compared with thresholds:
+
+```text
+soil_value < 30%  -> DRY
+30% to 70%        -> OPTIMAL
+soil_value > 70%  -> WET
+```
+
+This appears in:
+
+```text
+terminal output
+plant_data.csv
+Streamlit Recent Data tab
+Telegram/alert logic
+```
+
+### What does Telegram do?
+
+Telegram sends alerts when risk is detected.
+
+Alert triggers:
+
+```text
+Dry Soon
+DRY
+WET
+DHT Missing
+```
+
+Cooldown:
+
+```text
+Same alert type sends once every 30 minutes by default.
+```
+
+Example:
+
+```text
+10:00 Dry Soon -> sent
+10:10 Dry Soon -> cooldown
+10:30 Dry Soon still exists -> sent again
+```
+
+### Why does Streamlit have a Debug tab?
+
+The Debug tab helps during hardware testing.
+
+It shows:
+
+```text
+CSV path
+rows loaded
+Telegram configured
+Favoriot configured
+model file exists
+latest CSV row
+wiring hints
+```
+
+For presentation, you can call it:
+
+```text
+System Status
+```
+
+### Why are temperature and humidity separate charts?
+
+They use different units:
+
+```text
+temperature = C
+humidity = %
+```
+
+Keeping them separate makes the dashboard easier to explain and avoids confusing the lecturer.
+
+## 27. Missing Data Handling
+
+There are two types of missing data:
+
+```text
+existing training data
+real-time sensor data
+```
+
+They are handled differently.
+
+### Existing Training Data Missing Values
+
+Existing training data means:
+
+```text
+data/training_smart_agriculture.csv
+plant_data.csv when used for retraining
+```
+
+For training data, rows with missing required ML values are removed before model training.
+
+Code behavior:
+
+```text
+drop incomplete rows
+```
+
+Reason:
+
+```text
+The dataset has many rows, so removing incomplete rows is simpler and safer than inventing fake values.
+```
+
+Report sentence:
+
+> For existing training data, missing or invalid rows are removed before model training. This avoids training the model using incomplete or unreliable records.
+
+### Real-Time Sensor Missing Values
+
+For real-time hardware readings, missing values may indicate sensor or wiring failure.
+
+Handling:
+
+| Missing item | Handling |
+|---|---|
+| DHT11 temperature/humidity | ML prediction becomes `Unknown` and alert becomes `DHT Missing` |
+| First previous soil value | `moisture_change_rate` becomes `0.0` |
+| Telegram token/chat ID | Telegram is skipped safely |
+| Training CSV missing | Bootstrap demo data is used |
+| Saved model missing | Train from CSV |
+
+Why not fill missing real-time DHT data with average?
+
+```text
+Average filling can hide hardware failure.
+It may also create fake weather conditions.
+```
+
+Example:
+
+```text
+actual hot condition: 36 C
+average-filled value: 28 C
+```
+
+This could make the model predict incorrectly.
+
+Report sentence:
+
+> Missing real-time DHT11 readings are not filled with averages because this may hide a hardware fault and produce unreliable ML predictions. Instead, the system returns `Unknown` and triggers a `DHT Missing` alert.
+
+## 28. Data Processing and Filtering Methods
+
+Data processing means converting raw sensor readings into useful values.
+
+In this project:
+
+| Raw data | Processed value |
+|---|---|
+| Soil sensor analog value | Soil moisture percentage |
+| Soil moisture percentage | `DRY`, `OPTIMAL`, or `WET` |
+| Current and previous soil values | `moisture_change_rate` |
+| Pump `ON/OFF` | Numeric ML feature |
+| Temperature and humidity | ML input features |
+
+Filtering means handling unusable data.
+
+In this project:
+
+| Problem | Handling |
+|---|---|
+| Missing DHT11 reading | Return `Unknown` and alert user |
+| First row has no previous soil value | Set change rate to `0.0` |
+| Training CSV row is incomplete | Drop the row |
+| Telegram config missing | Skip Telegram safely |
+
+## 29. Baseline Logic vs Intelligent Logic
+
+Baseline logic is the simple rule-based method.
+
+It only checks current soil moisture:
+
+```text
+soil_value < 30% -> pump ON
+otherwise -> pump OFF
+```
+
+Intelligent logic is the ML prediction.
+
+It uses:
+
+```text
+soil_value
+temperature
+humidity
+previous_soil_value
+moisture_change_rate
+pump_status
+```
+
+It predicts:
+
+```text
+Dry Soon
+Not Dry Soon
+```
+
+Comparison:
+
+| Item | Baseline Logic | Intelligent Logic |
+|---|---|---|
+| Type | Rule-based | ML-based |
+| Uses | Current soil moisture only | Soil, temperature, humidity, trend, pump |
+| Output | `DRY`, `OPTIMAL`, `WET` | `Dry Soon`, `Not Dry Soon` |
+| Behavior | Reactive | Predictive |
+| Example | 45% soil means pump OFF | 45% soil plus hot/dry/falling trend means `Dry Soon` |
+
+Report sentence:
+
+> The baseline logic reacts only when the soil is already dry, while the intelligent logic predicts future dryness using environmental and trend features.
+
+## 30. How Student 4 Requirements Are Fulfilled
+
+Student 4 role:
+
+```text
+Data Processing and Intelligence Engineer
+```
+
+Assignment requirements and code evidence:
+
+| Requirement | How our code fulfills it |
+|---|---|
+| Preprocessing and filtering | Converts raw soil value to percentage, handles missing DHT data, drops invalid training rows |
+| Threshold or ML decision-making | Uses threshold classification and Decision Tree ML prediction |
+| Feature extraction and evaluation | Creates `previous_soil_value`, `moisture_change_rate`, and `pump_status_code` |
+| Compare intelligent logic against baseline | Code has both rule-based baseline and ML prediction; report table compares them |
+
+Student 4 report paragraph:
+
+> Student 4 handled the data processing and intelligence part of the system. Raw soil sensor values were converted into soil moisture percentages, and the soil condition was classified as `DRY`, `OPTIMAL`, or `WET`. Feature extraction was performed by calculating the previous soil value and moisture change rate. A threshold-based rule was used as the baseline method, while a Decision Tree model was used as the intelligent method to predict whether the soil will become dry in the next 10 minutes.
+
+## 31. How Student 5 Requirements Are Fulfilled
+
+Student 5 role:
+
+```text
+Dashboard, Visualization, and Connectivity Engineer
+```
+
+Assignment requirements and code evidence:
+
+| Requirement | How our code fulfills it |
+|---|---|
+| Dashboard/monitoring interface | Streamlit dashboard shows live data from `plant_data.csv` |
+| Visualization charts | Soil, temperature, humidity, and moisture change charts |
+| Alerts and notifications | Streamlit alert banners and Telegram alerts |
+| Monitoring features | Debug/System Status tab |
+| Cloud/data transmission | Favoriot REST support and Telegram Bot API |
+
+Student 5 report paragraph:
+
+> Student 5 handled the dashboard, visualization, and connectivity part of the system. Streamlit was developed as the main dashboard to display live sensor readings, pump status, ML prediction, charts, alerts, recent data, and system status. Telegram notifications were implemented to send alerts when the soil is dry, wet, predicted to become dry soon, or when DHT11 data is missing. Favoriot REST API support is included as optional cloud data transmission.
+
+## 32. Report-Ready Section for Student 4
+
+You can copy this into the report:
+
+> The data processing stage converts raw sensor readings into meaningful features. Soil moisture is converted into a percentage and classified as `DRY`, `OPTIMAL`, or `WET` using threshold logic. The system also extracts the previous soil value and moisture change rate to represent the drying trend. Missing real-time DHT11 values are handled by returning `Unknown` for ML prediction and generating a `DHT Missing` alert, while incomplete training rows are removed before model training.
+>
+> The baseline method uses a fixed threshold where soil moisture below 30% turns the pump ON. The intelligent method uses a Decision Tree model to predict whether the soil will become dry in the next 10 minutes using soil moisture, temperature, humidity, previous soil value, moisture change rate, and pump status. This makes the system predictive instead of only reactive.
+
+## 33. Report-Ready Section for Student 5
+
+You can copy this into the report:
+
+> The system uses Streamlit as the main dashboard. The dashboard reads `plant_data.csv`, which is updated by the Raspberry Pi monitoring script. It displays the latest soil moisture, temperature, humidity, pump status, and ML prediction. It also includes separate charts for soil moisture, temperature, humidity, and moisture change rate. Alert banners are shown when risk is detected, and the Debug/System Status tab helps check CSV status, Telegram configuration, model availability, and wiring hints.
+>
+> Telegram notification is implemented using the Telegram Bot API. When the system detects `Dry Soon`, `DRY`, `WET`, or `DHT Missing`, it sends an alert message to the configured user or group chat. A cooldown mechanism prevents repeated alerts from being sent too frequently. Favoriot REST API support is also included for optional cloud connectivity and IoT platform integration.
