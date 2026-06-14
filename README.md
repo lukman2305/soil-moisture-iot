@@ -233,26 +233,49 @@ If your DHT11 data wire is moved from GPIO4 to GPIO17, change:
 DHT_PIN=D17
 ```
 
-## Run
+## Run Commands
+
+### Run In WSL / Laptop Simulation
 
 ```bash
-python3 full_monitor.py
+cd ~/anaconda_projects/iot/project/soil-moisture-iot
+source ~/venvs/ml_env/bin/activate
+SIMULATION_MODE=true RUN_ONCE=true python full_monitor.py
+```
+
+This runs one test cycle without Raspberry Pi hardware.
+
+### Run Real Hardware On Raspberry Pi
+
+```bash
+cd ~/anaconda_projects/iot/project/soil-moisture-iot
+source ~/venvs/ml_env/bin/activate
+python full_monitor.py
+```
+
+Before real hardware demo, make sure `.env` has:
+
+```bash
+SIMULATION_MODE=false
+RUN_ONCE=false
 ```
 
 Stop with `Ctrl+C`. The script turns the pump OFF, clears GPIO, exits the DHT sensor cleanly, and clears the OLED.
 
-The default sampling interval is 10 minutes. To test faster during a demo, temporarily set `READ_INTERVAL_SECONDS=30` or another smaller value in `.env`.
+### Run Streamlit Dashboard
 
-Run one debug cycle without Raspberry Pi hardware:
+Open another terminal:
 
 ```bash
-SIMULATION_MODE=true RUN_ONCE=true python3 full_monitor.py
+cd ~/anaconda_projects/iot/project/soil-moisture-iot
+source ~/venvs/ml_env/bin/activate
+streamlit run streamlit_app.py --server.address 0.0.0.0
 ```
 
-Run the Streamlit dashboard:
+Then open in browser:
 
-```bash
-streamlit run streamlit_app.py
+```text
+http://<raspberry-pi-ip-address>:8501
 ```
 
 The dashboard auto-refreshes every 10 seconds by default so it can reread `plant_data.csv` during a demo. To disable it, set this in `.env`:
@@ -260,6 +283,63 @@ The dashboard auto-refreshes every 10 seconds by default so it can reread `plant
 ```bash
 STREAMLIT_REFRESH_SECONDS=0
 ```
+
+### Demo Settings To Adjust
+
+For normal real data collection:
+
+```bash
+READ_INTERVAL_SECONDS=600
+NOTIFICATION_COOLDOWN_SECONDS=1800
+STREAMLIT_REFRESH_SECONDS=10
+```
+
+For lecturer demo, change to faster:
+
+```bash
+READ_INTERVAL_SECONDS=10
+NOTIFICATION_COOLDOWN_SECONDS=60
+STREAMLIT_REFRESH_SECONDS=10
+```
+
+Meaning:
+
+```text
+READ_INTERVAL_SECONDS=10
+full_monitor.py reads sensors and writes CSV every 10 seconds
+
+NOTIFICATION_COOLDOWN_SECONDS=60
+Telegram can resend same alert after 60 seconds
+
+STREAMLIT_REFRESH_SECONDS=10
+Streamlit dashboard auto-refreshes every 10 seconds
+```
+
+Recommended demo `.env`:
+
+```bash
+SIMULATION_MODE=false
+RUN_ONCE=false
+READ_INTERVAL_SECONDS=10
+NOTIFICATION_COOLDOWN_SECONDS=60
+STREAMLIT_REFRESH_SECONDS=10
+ML_CONTROL_MODE=recommend
+```
+
+After demo, change back:
+
+```bash
+READ_INTERVAL_SECONDS=600
+NOTIFICATION_COOLDOWN_SECONDS=1800
+```
+
+Keep:
+
+```bash
+ML_CONTROL_MODE=recommend
+```
+
+for safe demo unless you specifically want ML to turn the pump ON early.
 
 ## Machine Learning
 
