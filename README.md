@@ -224,6 +224,7 @@ DRY_PERCENT=30
 WET_PERCENT=70
 TELEGRAM_ENABLED=false
 NOTIFICATION_COOLDOWN_SECONDS=1800
+STREAMLIT_REFRESH_SECONDS=10
 ```
 
 If your DHT11 data wire is moved from GPIO4 to GPIO17, change:
@@ -252,6 +253,12 @@ Run the Streamlit dashboard:
 
 ```bash
 streamlit run streamlit_app.py
+```
+
+The dashboard auto-refreshes every 10 seconds by default so it can reread `plant_data.csv` during a demo. To disable it, set this in `.env`:
+
+```bash
+STREAMLIT_REFRESH_SECONDS=0
 ```
 
 ## Machine Learning

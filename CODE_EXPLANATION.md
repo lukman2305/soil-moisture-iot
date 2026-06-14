@@ -210,6 +210,7 @@ Dashboard features:
 
 - Latest soil moisture, temperature, humidity, pump status, and ML prediction.
 - Alert banners for risk conditions.
+- Auto-refresh based on `STREAMLIT_REFRESH_SECONDS`.
 - Soil moisture chart.
 - Temperature chart.
 - Humidity chart.

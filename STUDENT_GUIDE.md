@@ -339,6 +339,24 @@ It shows:
 - recent CSV rows
 - debug/system status tab
 
+Auto-refresh:
+
+```text
+Streamlit reloads the dashboard every STREAMLIT_REFRESH_SECONDS seconds.
+Default: 10 seconds.
+```
+
+This only refreshes the dashboard display. It does not restart `full_monitor.py`, does not read sensors, and does not control the pump.
+
+Flow:
+
+```text
+full_monitor.py writes plant_data.csv
+Streamlit auto-refreshes
+Streamlit rereads plant_data.csv
+Dashboard values update
+```
+
 Why there is a debug tab:
 
 ```text

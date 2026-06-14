@@ -2,7 +2,7 @@ import unittest
 
 import pandas as pd
 
-from streamlit_app import chart_sections
+from streamlit_app import chart_sections, refresh_script, streamlit_refresh_seconds
 
 
 class StreamlitDashboardTest(unittest.TestCase):
@@ -28,6 +28,20 @@ class StreamlitDashboardTest(unittest.TestCase):
                 ("Moisture Change Rate", ["moisture_change_rate"]),
             ],
         )
+
+    def test_streamlit_refresh_seconds_uses_default_and_valid_env_value(self):
+        self.assertEqual(streamlit_refresh_seconds({}), 10)
+        self.assertEqual(streamlit_refresh_seconds({"STREAMLIT_REFRESH_SECONDS": "5"}), 5)
+
+    def test_streamlit_refresh_seconds_disables_invalid_or_zero_value(self):
+        self.assertEqual(streamlit_refresh_seconds({"STREAMLIT_REFRESH_SECONDS": "0"}), 0)
+        self.assertEqual(streamlit_refresh_seconds({"STREAMLIT_REFRESH_SECONDS": "abc"}), 0)
+
+    def test_refresh_script_uses_milliseconds(self):
+        script = refresh_script(10)
+
+        self.assertIn("10000", script)
+        self.assertIn("window.parent.location.reload()", script)
 
 
 if __name__ == "__main__":

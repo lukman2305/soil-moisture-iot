@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from plant_monitor.app import SensorReading
 from plant_monitor.debug import build_startup_diagnostics
@@ -20,7 +21,6 @@ CSV_FILE = Path(os.getenv("CSV_FILE", str(BASE_DIR / "plant_data.csv")))
 MODEL_PATH = BASE_DIR / "models" / "dryness_model.joblib"
 
 
-@st.cache_data(ttl=30)
 def load_data(csv_path):
     path = Path(csv_path)
     if not path.exists() or path.stat().st_size == 0:
@@ -33,6 +33,32 @@ def load_data(csv_path):
         if column in frame.columns:
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
     return frame
+
+
+def streamlit_refresh_seconds(env=None):
+    source = os.environ if env is None else env
+    try:
+        value = int(source.get("STREAMLIT_REFRESH_SECONDS", "10"))
+    except ValueError:
+        return 0
+    return max(0, value)
+
+
+def refresh_script(refresh_seconds):
+    refresh_milliseconds = int(refresh_seconds) * 1000
+    return f"""
+    <script>
+      setTimeout(function() {{
+        window.parent.location.reload();
+      }}, {refresh_milliseconds});
+    </script>
+    """
+
+
+def enable_auto_refresh(refresh_seconds):
+    if refresh_seconds <= 0:
+        return
+    components.html(refresh_script(refresh_seconds), height=0)
 
 
 def latest_reading(frame):
@@ -164,8 +190,13 @@ def show_debug(frame):
 
 def main():
     st.set_page_config(page_title="Smart Plant Dashboard", page_icon=":seedling:", layout="wide")
+    refresh_seconds = streamlit_refresh_seconds()
+    enable_auto_refresh(refresh_seconds)
     st.title("Smart Plant Monitoring Dashboard")
-    st.caption("Predictive irrigation dashboard for soil dryness risk, notifications, and debugging.")
+    st.caption(
+        "Predictive irrigation dashboard for soil dryness risk, notifications, and debugging. "
+        f"Auto-refresh: {'off' if refresh_seconds <= 0 else str(refresh_seconds) + 's'}."
+    )
 
     frame = load_data(CSV_FILE)
     reading = latest_reading(frame)
