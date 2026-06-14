@@ -2,6 +2,16 @@
 
 This project is a hardware-based IoT system for smart agriculture. It reads plant environment data, predicts whether soil will become dry in the next 10 minutes, controls a water pump automatically, logs sensor data for future machine learning work, and shows monitoring data in a Streamlit dashboard. Favoriot sending remains optional for assignment compatibility.
 
+## Start Here
+
+If the project feels confusing, read this first:
+
+```text
+STUDENT_GUIDE.md
+```
+
+It combines the main explanation, model/training flow, status meanings, Telegram alerts, Streamlit dashboard, demo plan, and Student 4/Student 5 report points.
+
 ## Simple Project Explanation
 
 This project is a smart plant watering system. The Raspberry Pi 400 reads the plant's environment using three main sensor values:
@@ -82,6 +92,12 @@ This means ML will warn or recommend, but it will not control the pump early unl
 For presentation, explain it like this:
 
 > This project monitors soil moisture, temperature, and humidity using Raspberry Pi 400. A threshold system controls the pump when the soil is already dry. On top of that, a machine learning model predicts whether the soil will become dry in the next 10 minutes using the current moisture, previous moisture, moisture change rate, temperature, humidity, and pump status. The result is shown on an OLED display and a Streamlit dashboard. If risk is detected, the system can show alerts and optionally send Telegram notifications.
+
+For the full student-friendly guide, read:
+
+```text
+STUDENT_GUIDE.md
+```
 
 For a file-by-file code explanation and Telegram troubleshooting guide, read:
 

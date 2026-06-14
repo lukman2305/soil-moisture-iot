@@ -211,7 +211,8 @@ Dashboard features:
 - Latest soil moisture, temperature, humidity, pump status, and ML prediction.
 - Alert banners for risk conditions.
 - Soil moisture chart.
-- Temperature and humidity chart.
+- Temperature chart.
+- Humidity chart.
 - Moisture change rate chart.
 - Recent CSV data table.
 - Debug tab with configuration status and wiring hints.
