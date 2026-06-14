@@ -97,21 +97,29 @@ def show_alerts(reading, frame):
             st.warning(f"Alert: {event}")
 
 
+def chart_sections(frame):
+    available_sections = [
+        ("Soil Moisture Trend", ["soil_value"]),
+        ("Temperature Trend", ["temperature"]),
+        ("Humidity Trend", ["humidity"]),
+        ("Moisture Change Rate", ["moisture_change_rate"]),
+    ]
+    return [
+        (title, columns)
+        for title, columns in available_sections
+        if all(column in frame.columns for column in columns)
+    ]
+
+
 def show_charts(frame):
     if frame.empty or "timestamp" not in frame.columns:
         st.info("No chart data available yet.")
         return
 
     chart_frame = frame.dropna(subset=["timestamp"]).set_index("timestamp")
-    if "soil_value" in chart_frame:
-        st.subheader("Soil Moisture Trend")
-        st.line_chart(chart_frame[["soil_value"]])
-    if {"temperature", "humidity"}.issubset(chart_frame.columns):
-        st.subheader("Temperature and Humidity")
-        st.line_chart(chart_frame[["temperature", "humidity"]])
-    if "moisture_change_rate" in chart_frame:
-        st.subheader("Moisture Change Rate")
-        st.line_chart(chart_frame[["moisture_change_rate"]])
+    for title, columns in chart_sections(chart_frame):
+        st.subheader(title)
+        st.line_chart(chart_frame[columns])
 
 
 def show_debug(frame):
