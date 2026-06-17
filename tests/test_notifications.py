@@ -25,9 +25,14 @@ class NotificationsTest(unittest.TestCase):
             "soil_value": 24.0,
             "previous_soil_value": 34.0,
             "moisture_change_rate": -10.0,
+            "forecast_soil_4hr": 28.0,
+            "forecast_soil_6hr": 35.0,
+            "forecast_soil_8hr": 42.0,
+            "forecast_risk": "Dry Forecast",
+            "forecast_recommendation": "Recommend watering soon.",
             "soil_status": "DRY",
             "pump_status": "ON",
-            "ml_prediction": "Dry Soon",
+            "ml_prediction": "Forecast Dry",
             "dry_soon_label": "Dry Soon",
             "notification_status": "",
             "debug_status": "OK",
@@ -38,7 +43,7 @@ class NotificationsTest(unittest.TestCase):
     def test_detect_risk_events_reports_all_risk_states(self):
         events = detect_risk_events(self.reading(temperature=None, soil_status="WET"))
 
-        self.assertEqual(events, ["Dry Soon", "WET", "DHT Missing"])
+        self.assertEqual(events, ["Forecast Dry", "WET", "DHT Missing"])
 
     def test_send_telegram_alerts_skips_when_not_configured(self):
         calls = []
@@ -71,10 +76,10 @@ class NotificationsTest(unittest.TestCase):
             )
             now = datetime(2026, 6, 12, 10, 30, 0)
 
-            first = send_telegram_alerts(config, ["Dry Soon"], self.reading(), state_path, now, post=fake_post)
+            first = send_telegram_alerts(config, ["Forecast Dry"], self.reading(), state_path, now, post=fake_post)
             second = send_telegram_alerts(
                 config,
-                ["Dry Soon"],
+                ["Forecast Dry"],
                 self.reading(),
                 state_path,
                 now + timedelta(minutes=10),
@@ -82,16 +87,16 @@ class NotificationsTest(unittest.TestCase):
             )
             third = send_telegram_alerts(
                 config,
-                ["Dry Soon"],
+                ["Forecast Dry"],
                 self.reading(),
                 state_path,
                 now + timedelta(minutes=31),
                 post=fake_post,
             )
 
-        self.assertEqual(first, "TELEGRAM_SENT:Dry Soon")
-        self.assertEqual(second, "TELEGRAM_COOLDOWN:Dry Soon")
-        self.assertEqual(third, "TELEGRAM_SENT:Dry Soon")
+        self.assertEqual(first, "TELEGRAM_SENT:Forecast Dry")
+        self.assertEqual(second, "TELEGRAM_COOLDOWN:Forecast Dry")
+        self.assertEqual(third, "TELEGRAM_SENT:Forecast Dry")
         self.assertEqual(len(calls), 2)
 
 

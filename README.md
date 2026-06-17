@@ -1,158 +1,77 @@
 # Raspberry Pi 400 Smart Plant Monitoring and Watering System
 
-This project is a hardware-based IoT system for smart agriculture. It reads plant environment data, predicts whether soil will become dry in the next 10 minutes, controls a water pump automatically, logs sensor data for future machine learning work, and shows monitoring data in a Streamlit dashboard. Favoriot sending remains optional for assignment compatibility.
+This project is a hardware-based IoT smart agriculture system. It reads soil moisture, temperature, and humidity, saves the readings into `plant_data.csv`, forecasts future soil moisture using SARIMAX, controls a water pump safely, shows a Streamlit dashboard, and can send Telegram/Favoriot updates.
 
-## Start Here
+## Main Objective
 
-If the project feels confusing, read this first:
-
-```text
-STUDENT_GUIDE.md
-```
-
-It combines the main explanation, model/training flow, status meanings, Telegram alerts, Streamlit dashboard, demo plan, and Student 4/Student 5 report points.
-
-## Simple Project Explanation
-
-This project is a smart plant watering system. The Raspberry Pi 400 reads the plant's environment using three main sensor values:
-
-- soil moisture
-- temperature
-- humidity
-
-A normal irrigation system only checks whether the soil is dry right now. If the soil is already dry, it turns on the pump. This project is stronger because it also uses machine learning to predict whether the soil is likely to become dry soon.
-
-In simple words:
+The new ML objective is:
 
 ```text
-Normal system:
-Soil is dry now -> turn pump ON
-
-Our system:
-Soil is not dry yet, but temperature is high, humidity is low, and moisture is dropping -> predict Dry Soon
+Forecast soil moisture for the next 4 hours, 6 hours, and 8 hours.
 ```
 
-The goal is to water the plant before plant stress happens, instead of waiting until the soil is already too dry.
+This is stronger than only predicting `Dry Soon / Not Dry Soon` because the dashboard can show the future soil value, not only a class label.
 
-## Whole System Flow
+## System Flow
 
 ```text
-Sensors
-  -> Raspberry Pi 400
-  -> clean and process readings
-  -> calculate soil condition and moisture trend
-  -> machine learning predicts Dry Soon or Not Dry Soon
-  -> pump decision is made
-  -> OLED display updates
-  -> CSV file saves data
-  -> Streamlit dashboard shows charts and alerts
-  -> optional Telegram/Favoriot notification is sent
+DHT11 + soil sensor
+  -> Raspberry Pi 400 full_monitor.py
+  -> preprocessing and feature extraction
+  -> SARIMAX forecast for 4h / 6h / 8h
+  -> pump decision
+  -> OLED display
+  -> plant_data.csv
+  -> Streamlit dashboard
+  -> optional Telegram and Favoriot
 ```
 
-## What Each Part Does
-
-- **DHT11 sensor** reads temperature and humidity.
-- **Soil moisture sensor** reads how wet or dry the soil is.
-- **MCP3008 ADC** converts the soil sensor's analog value into a digital value the Raspberry Pi can read.
-- **Raspberry Pi 400** runs the Python program, processes readings, predicts dryness, controls the pump, and saves data.
-- **Relay module** switches the water pump ON or OFF.
-- **OLED display** shows the latest plant status beside the hardware.
-- **Streamlit dashboard** shows live status, charts, recent readings, alerts, and a debug tab.
-- **Machine learning model** predicts whether the soil will become dry in the next 10 minutes.
-- **Telegram notification** can send warnings to a phone when risk is detected.
-- **Favoriot** is optional and can still receive IoT data if required for the assignment.
-
-## Main Decision Logic
-
-The system still keeps a safe rule-based backup:
-
-```text
-If soil is DRY -> pump ON
-If soil is WET -> pump OFF
-```
-
-Machine learning adds predictive behavior:
-
-```text
-If soil is OPTIMAL but ML predicts Dry Soon -> warn user
-If ML_CONTROL_MODE=control -> pump can turn ON early
-If ML_CONTROL_MODE=recommend -> show recommendation only
-```
-
-The default setting is safe:
-
-```text
-ML_CONTROL_MODE=recommend
-```
-
-This means ML will warn or recommend, but it will not control the pump early unless the user enables control mode.
-
-## Demo Explanation
-
-For presentation, explain it like this:
-
-> This project monitors soil moisture, temperature, and humidity using Raspberry Pi 400. A threshold system controls the pump when the soil is already dry. On top of that, a machine learning model predicts whether the soil will become dry in the next 10 minutes using the current moisture, previous moisture, moisture change rate, temperature, humidity, and pump status. The result is shown on an OLED display and a Streamlit dashboard. If risk is detected, the system can show alerts and optionally send Telegram notifications.
-
-For the full student-friendly guide, read:
-
-```text
-STUDENT_GUIDE.md
-```
-
-For a file-by-file code explanation and Telegram troubleshooting guide, read:
-
-```text
-CODE_EXPLANATION.md
-```
+`full_monitor.py` reads sensors and controls hardware. `streamlit_app.py` does not read sensors directly; it reads `plant_data.csv`, so both programs work together.
 
 ## Hardware
 
 - Raspberry Pi 400
 - DHT11 temperature and humidity sensor
-- Soil moisture sensor analog output AO
-- MCP3008 ADC for soil sensor analog-to-digital conversion
-- SSD1306 OLED I2C display, 128x64
-- 1-channel relay module
+- Soil moisture sensor with analog output AO
+- MCP3008 ADC
+- SSD1306 OLED I2C display 128x64
+- 1-channel active-LOW relay module
 - DC water pump
-- Streamlit local dashboard
+- Streamlit dashboard
+- Optional Telegram bot
 - Optional Favoriot IoT dashboard
-- Optional Telegram notification bot
 
-## Current Behavior
+## Decision Logic
 
-- Reads temperature and humidity from DHT11.
-- Reads soil moisture AO through MCP3008 channel 0.
-- Converts soil reading to a moisture percentage where `0%` is very dry and `100%` is very wet.
-- Classifies soil condition:
-  - `< 30%`: `DRY`
-  - `30%` to `70%`: `OPTIMAL`
-  - `> 70%`: `WET`
-- Controls an active-LOW relay on GPIO18:
-  - `GPIO.LOW`: pump ON
-  - `GPIO.HIGH`: pump OFF
-- Shows live data on the OLED display.
-- Saves readings to `plant_data.csv`.
-- Sends data to Favoriot using REST API.
-- Samples, logs, displays, and uploads data every 10 minutes by default.
-- Predicts `Dry Soon` or `Not Dry Soon` using a Decision Tree model.
-- Shows risk notifications on Streamlit, OLED, and optional Telegram.
-- Supports simulation and one-cycle debug modes for testing without hardware.
+The system keeps a safe threshold backup:
 
-## Favoriot Dashboard Fields
+```text
+soil_value < 30%  -> DRY -> pump ON
+30% to 70%        -> OPTIMAL
+soil_value > 70%  -> WET -> pump OFF
+```
 
-Favoriot is optional. When configured, the script sends this payload under the configured `device_developer_id`:
+Forecast logic:
 
-- `temperature`
-- `humidity`
-- `soil_value`
-- `soil_status`
-- `pump_status`
-- `ml_prediction`
-- `notification_status`
+```text
+If any forecast value at 4h, 6h, or 8h is below 30%, forecast_risk = Dry Forecast.
+```
+
+Pump safety:
+
+```text
+ML_CONTROL_MODE=recommend
+Forecast dry -> show warning only, pump stays OFF unless soil is already DRY.
+
+ML_CONTROL_MODE=control
+Forecast dry + soil is OPTIMAL -> pump may turn ON early.
+```
+
+Default mode is `recommend` for safer demonstrations.
 
 ## CSV Columns
 
-`plant_data.csv` uses these columns:
+`plant_data.csv` stores every reading:
 
 - `timestamp`
 - `temperature`
@@ -160,54 +79,68 @@ Favoriot is optional. When configured, the script sends this payload under the c
 - `soil_value`
 - `previous_soil_value`
 - `moisture_change_rate`
+- `vpd`
+- `soil_lag_1`
+- `soil_lag_2`
+- `soil_lag_3`
+- `soil_rolling_mean`
+- `soil_rate_per_hour`
 - `soil_status`
 - `pump_status`
+- `forecast_soil_4hr`
+- `forecast_soil_6hr`
+- `forecast_soil_8hr`
+- `forecast_risk`
+- `forecast_recommendation`
 - `ml_prediction`
 - `dry_soon_label`
 - `notification_status`
 - `debug_status`
 
-## Setup
+`ml_prediction` is kept for compatibility. It now shows `Forecast Dry`, `Forecast OK`, or `Unknown`.
 
-Install Raspberry Pi OS packages needed for GPIO, I2C, SPI, and DHT support first if your Pi does not already have them.
+## Forecast Features
 
-Create and activate a virtual environment:
+SARIMAX uses real timestamped `plant_data.csv` readings. The code creates:
+
+- lag features: `soil_lag_1`, `soil_lag_2`, `soil_lag_3`
+- recent rolling mean: `soil_rolling_mean`
+- drying speed: `soil_rate_per_hour`
+- vapour pressure deficit: `vpd`
+- future targets: `target_soil_4hr`, `target_soil_6hr`, `target_soil_8hr`
+
+Future temperature, humidity, and VPD are estimated using the recent average window:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+FORECAST_RECENT_AVERAGE_HOURS=1
 ```
 
-Enable Raspberry Pi interfaces:
+## Kaggle vs Real Data
+
+The Kaggle smart agriculture CSV can remain in the repo as starter/classification data and report evidence. For SARIMAX forecasting, the correct training source is real timestamped Raspberry Pi data:
+
+```text
+plant_data.csv
+```
+
+Reason: SARIMAX is a time-series model. It needs readings in time order with timestamps.
+
+## Setup
+
+```bash
+cd ~/anaconda_projects/iot/project/soil-moisture-iot
+source ~/venvs/ml_env/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+On Raspberry Pi, enable I2C and SPI:
 
 ```bash
 sudo raspi-config
 ```
 
-Enable:
-
-- I2C for the OLED display
-- SPI for MCP3008
-
-## Configuration
-
-Copy the example environment file:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and fill in your real Favoriot values:
-
-```bash
-FAVORIOT_API_KEY=your_real_api_key
-FAVORIOT_DEVICE_DEVELOPER_ID=your_device_developer_id
-```
-
-Do not commit `.env` to GitHub. It is ignored by `.gitignore`.
-
-Useful hardware settings in `.env`:
+## Important `.env` Settings
 
 ```bash
 DHT_PIN=D4
@@ -218,75 +151,58 @@ ML_CONTROL_MODE=recommend
 DEBUG_MODE=false
 SIMULATION_MODE=false
 RUN_ONCE=false
-SOIL_DRY_RAW=1.0
-SOIL_WET_RAW=0.0
 DRY_PERCENT=30
 WET_PERCENT=70
-TELEGRAM_ENABLED=false
-NOTIFICATION_COOLDOWN_SECONDS=1800
+CSV_FILE=plant_data.csv
+
+FORECAST_MODEL_PATH=models/soil_forecast_sarimax.joblib
+FORECAST_MIN_ROWS=24
+FORECAST_RECENT_AVERAGE_HOURS=1
+FORECAST_HORIZONS_HOURS=4,6,8
+FORECAST_DRY_PERCENT=30
+
 STREAMLIT_REFRESH_SECONDS=10
-```
-
-If your DHT11 data wire is moved from GPIO4 to GPIO17, change:
-
-```bash
-DHT_PIN=D17
 ```
 
 ## Run Commands
 
-### Run In WSL / Laptop Simulation
+Test one cycle without Raspberry Pi hardware:
 
 ```bash
-cd ~/anaconda_projects/iot/project/soil-moisture-iot
-source ~/venvs/ml_env/bin/activate
 SIMULATION_MODE=true RUN_ONCE=true python full_monitor.py
 ```
 
-This runs one test cycle without Raspberry Pi hardware.
-
-### Run Real Hardware On Raspberry Pi
+Run real hardware on Raspberry Pi:
 
 ```bash
-cd ~/anaconda_projects/iot/project/soil-moisture-iot
-source ~/venvs/ml_env/bin/activate
 python full_monitor.py
 ```
 
-Before real hardware demo, make sure `.env` has:
+Run Streamlit dashboard in another terminal:
 
 ```bash
-SIMULATION_MODE=false
-RUN_ONCE=false
-```
-
-Stop with `Ctrl+C`. The script turns the pump OFF, clears GPIO, exits the DHT sensor cleanly, and clears the OLED.
-
-### Run Streamlit Dashboard
-
-Open another terminal:
-
-```bash
-cd ~/anaconda_projects/iot/project/soil-moisture-iot
-source ~/venvs/ml_env/bin/activate
 streamlit run streamlit_app.py --server.address 0.0.0.0
 ```
 
-Then open in browser:
+Open:
 
 ```text
 http://<raspberry-pi-ip-address>:8501
 ```
 
-The dashboard auto-refreshes every 10 seconds by default so it can reread `plant_data.csv` during a demo. To disable it, set this in `.env`:
+## Train SARIMAX Forecast Model
+
+After collecting enough real rows in `plant_data.csv`, run:
 
 ```bash
-STREAMLIT_REFRESH_SECONDS=0
+python -m plant_monitor.train_forecast_model
 ```
 
-### Demo Settings To Adjust
+If there are not enough rows, the command prints `FORECAST_NOT_ENOUGH_DATA`. The monitor and dashboard will still run, but forecast values show as unavailable and pump control falls back to current soil threshold logic.
 
-For normal real data collection:
+## Demo Settings
+
+Normal collection:
 
 ```bash
 READ_INTERVAL_SECONDS=600
@@ -294,162 +210,40 @@ NOTIFICATION_COOLDOWN_SECONDS=1800
 STREAMLIT_REFRESH_SECONDS=10
 ```
 
-For lecturer demo, change to faster:
+Lecturer demo:
 
 ```bash
-READ_INTERVAL_SECONDS=10
-NOTIFICATION_COOLDOWN_SECONDS=60
-STREAMLIT_REFRESH_SECONDS=10
-```
-
-Meaning:
-
-```text
-READ_INTERVAL_SECONDS=10
-full_monitor.py reads sensors and writes CSV every 10 seconds
-
-NOTIFICATION_COOLDOWN_SECONDS=60
-Telegram can resend same alert after 60 seconds
-
-STREAMLIT_REFRESH_SECONDS=10
-Streamlit dashboard auto-refreshes every 10 seconds
-```
-
-Recommended demo `.env`:
-
-```bash
-SIMULATION_MODE=false
-RUN_ONCE=false
 READ_INTERVAL_SECONDS=10
 NOTIFICATION_COOLDOWN_SECONDS=60
 STREAMLIT_REFRESH_SECONDS=10
 ML_CONTROL_MODE=recommend
 ```
 
-After demo, change back:
+After the demo, change `READ_INTERVAL_SECONDS` back to `600`.
 
-```bash
-READ_INTERVAL_SECONDS=600
-NOTIFICATION_COOLDOWN_SECONDS=1800
-```
+## Telegram Alerts
 
-Keep:
-
-```bash
-ML_CONTROL_MODE=recommend
-```
-
-for safe demo unless you specifically want ML to turn the pump ON early.
-
-## Machine Learning
-
-The model predicts:
-
-```text
-Will soil become dry in the next 10 minutes?
-```
-
-Inputs:
-
-- current soil moisture
-- temperature
-- humidity
-- previous soil moisture
-- moisture change rate
-- pump status
-
-Output:
-
-- `Dry Soon`
-- `Not Dry Soon`
-
-The first training source is the Kaggle smart agriculture CSV you uploaded locally:
-
-```text
-data/training_smart_agriculture.csv
-```
-
-The code now supports the raw Kaggle columns:
-
-```text
-crop ID,soil_type,Seedling Stage,MOI,temp,humidity,result
-```
-
-For this project, the Kaggle columns are converted like this:
-
-- `MOI` -> `soil_value`
-- `temp` -> `temperature`
-- `humidity` -> `humidity`
-- `result=0` -> `Not Dry Soon`
-- `result=1` or `result=2` -> `Dry Soon`
-
-Because the Kaggle file is not your real Raspberry Pi time series, `previous_soil_value` and `moisture_change_rate` are estimated from the previous row within the same crop, soil type, and seedling stage group. This makes Kaggle useful as a starter dataset, but your own `plant_data.csv` is still the stronger final dataset.
-
-The canonical training format is also supported:
-
-```text
-soil_value,temperature,humidity,previous_soil_value,moisture_change_rate,pump_status,dry_soon_label
-```
-
-After collecting real sensor data for some time, you can retrain from your own CSV by changing `.env`:
-
-```bash
-TRAINING_CSV_FILE=plant_data.csv
-```
-
-If `dry_soon_label` is blank in real data, the trainer labels each row using the next sensor row. Since the default sampling time is 10 minutes, the next row means "soil condition in the next 10 minutes." If the next soil value is below `30%`, the label becomes `Dry Soon`; otherwise it becomes `Not Dry Soon`.
-
-For safety, `ML_CONTROL_MODE=recommend` is the default. Set `ML_CONTROL_MODE=control` only when you want the ML prediction to turn the pump ON early. If a saved model file already exists and you want to force retraining, remove `models/dryness_model.joblib` or set `MODEL_PATH` to a new file name.
-
-## Notifications and Debug
-
-Telegram settings are optional and must stay in `.env`:
+Telegram is optional. Add these to `.env`:
 
 ```bash
 TELEGRAM_ENABLED=true
 TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
+TELEGRAM_CHAT_ID=your_chat_or_group_id
 NOTIFICATION_COOLDOWN_SECONDS=1800
 ```
 
-Telegram sends at most one repeated warning per risk type every 30 minutes.
+Alert triggers:
 
-Telegram alerts are sent by `full_monitor.py`, not by the Streamlit dashboard. Streamlit only shows the latest alert status from `plant_data.csv`.
+- `Forecast Dry`
+- `DRY`
+- `WET`
+- `DHT Missing`
 
-Telegram alert triggers:
+Telegram sends the same warning type only once per cooldown period.
 
-- `Dry Soon`: the ML model predicts future dryness.
-- `DRY`: soil moisture is below the dry threshold.
-- `WET`: soil moisture is above the wet threshold.
-- `DHT Missing`: temperature or humidity failed to read.
-
-Telegram status is saved into the `notification_status` CSV column. Common values are:
-
-- `NO_RISK`
-- `TELEGRAM_SKIPPED`
-- `TELEGRAM_SENT:Dry Soon`
-- `TELEGRAM_COOLDOWN:Dry Soon`
-- `TELEGRAM_ERROR:<status_code>`
-
-The Streamlit Debug tab shows CSV status, model status, configuration status, and wiring hints for DHT11, MCP3008, relay, I2C, and SPI.
-
-## Project Structure
-
-- `full_monitor.py`: Raspberry Pi hardware loop.
-- `plant_monitor/logic.py`: soil percentage, classification, pump decision, and Favoriot config logic.
-- `plant_monitor/app.py`: CSV writing, Favoriot payload/sending, relay output helper, OLED text formatting.
-- `plant_monitor/env.py`: local `.env` loader.
-- `plant_monitor/ml.py`: Decision Tree training and dry-soon prediction helpers.
-- `plant_monitor/notifications.py`: risk detection and Telegram alerts.
-- `plant_monitor/debug.py`: startup diagnostics and reason-code logging.
-- `plant_monitor/settings.py`: environment-backed runtime settings.
-- `streamlit_app.py`: local monitoring dashboard.
-- `tests/`: unit tests for the non-hardware logic.
-
-## Test
-
-The unit tests can run on a normal computer because they avoid Raspberry Pi hardware imports.
+## Tests
 
 ```bash
 python -m unittest discover -s tests
+python -m compileall full_monitor.py plant_monitor tests streamlit_app.py
 ```

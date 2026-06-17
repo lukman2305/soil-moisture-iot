@@ -8,7 +8,6 @@ from plant_monitor.app import (
     SensorReading,
     ensure_csv_header,
     format_oled_lines,
-    read_latest_soil_value,
     send_to_favoriot,
     set_pump_output,
     write_csv_reading,
@@ -17,12 +16,21 @@ from plant_monitor.debug import build_startup_diagnostics, debug_status_from_dia
 from plant_monitor.env import load_env_file
 from plant_monitor.logic import (
     classify_soil,
-    decide_pump_status,
-    decide_pump_status_with_ml,
+    decide_pump_status_with_forecast,
     load_favoriot_config,
     raw_to_moisture_percent,
 )
-from plant_monitor.ml import calculate_moisture_change_rate, load_or_train_model, predict_dryness
+from plant_monitor.forecast import (
+    FORECAST_MODEL_MISSING,
+    FORECAST_NOT_ENOUGH_DATA,
+    append_current_reading,
+    enrich_forecast_features,
+    forecast_soil_moisture,
+    load_forecast_model,
+    parse_forecast_horizons,
+    load_forecast_history,
+)
+from plant_monitor.ml import calculate_moisture_change_rate
 from plant_monitor.notifications import detect_risk_events, send_telegram_alerts
 from plant_monitor.settings import (
     debug_mode_enabled,
@@ -47,8 +55,10 @@ DEBUG_MODE = debug_mode_enabled()
 SIMULATION_MODE = simulation_mode_enabled()
 RUN_ONCE = run_once_enabled()
 
-MODEL_PATH = Path(os.getenv("MODEL_PATH", str(BASE_DIR / "models" / "dryness_model.joblib")))
-TRAINING_CSV_FILE = Path(os.getenv("TRAINING_CSV_FILE", str(BASE_DIR / "data" / "training_smart_agriculture.csv")))
+FORECAST_MODEL_PATH = Path(os.getenv("FORECAST_MODEL_PATH", str(BASE_DIR / "models" / "soil_forecast_sarimax.joblib")))
+FORECAST_MIN_ROWS = int(os.getenv("FORECAST_MIN_ROWS", "24"))
+FORECAST_RECENT_AVERAGE_HOURS = float(os.getenv("FORECAST_RECENT_AVERAGE_HOURS", "1"))
+FORECAST_HORIZONS_HOURS = parse_forecast_horizons(os.getenv("FORECAST_HORIZONS_HOURS", "4,6,8"))
 TELEGRAM_STATE_FILE = Path(os.getenv("TELEGRAM_STATE_FILE", str(BASE_DIR / ".telegram_state.json")))
 
 # For most analog soil sensors: raw MCP3008 value is high when dry and low when wet.
@@ -56,6 +66,7 @@ SOIL_DRY_RAW = float(os.getenv("SOIL_DRY_RAW", "1.0"))
 SOIL_WET_RAW = float(os.getenv("SOIL_WET_RAW", "0.0"))
 DRY_PERCENT = float(os.getenv("DRY_PERCENT", "30"))
 WET_PERCENT = float(os.getenv("WET_PERCENT", "70"))
+FORECAST_DRY_PERCENT = float(os.getenv("FORECAST_DRY_PERCENT", str(DRY_PERCENT)))
 
 
 def simulated_sensor_values(env=None):
@@ -126,20 +137,21 @@ def build_reading_from_values(
     temperature,
     humidity,
     soil_value,
-    previous_soil_value,
-    ml_prediction,
-    ml_control_mode,
+    latest_features,
+    forecast_result,
+    control_mode,
     notification_status="",
     debug_status="OK",
     dry_soon_label="",
 ):
+    previous_soil_value = clean_number(latest_features.get("soil_lag_1")) if latest_features else None
     moisture_change_rate = calculate_moisture_change_rate(soil_value, previous_soil_value)
     soil_status = classify_soil(
         soil_value,
         dry_threshold=DRY_PERCENT,
         wet_threshold=WET_PERCENT,
     )
-    pump_status = decide_pump_status_with_ml(soil_status, ml_prediction, ml_control_mode)
+    pump_status = decide_pump_status_with_forecast(soil_status, forecast_result.forecast_risk, control_mode)
 
     return SensorReading(
         timestamp=timestamp,
@@ -148,9 +160,20 @@ def build_reading_from_values(
         soil_value=soil_value,
         previous_soil_value=previous_soil_value,
         moisture_change_rate=moisture_change_rate,
+        vpd=clean_number(latest_features.get("vpd")) if latest_features else None,
+        soil_lag_1=clean_number(latest_features.get("soil_lag_1")) if latest_features else None,
+        soil_lag_2=clean_number(latest_features.get("soil_lag_2")) if latest_features else None,
+        soil_lag_3=clean_number(latest_features.get("soil_lag_3")) if latest_features else None,
+        soil_rolling_mean=clean_number(latest_features.get("soil_rolling_mean")) if latest_features else None,
+        soil_rate_per_hour=clean_number(latest_features.get("soil_rate_per_hour")) if latest_features else None,
         soil_status=soil_status,
         pump_status=pump_status,
-        ml_prediction=ml_prediction,
+        forecast_soil_4hr=forecast_result.forecast_soil_4hr,
+        forecast_soil_6hr=forecast_result.forecast_soil_6hr,
+        forecast_soil_8hr=forecast_result.forecast_soil_8hr,
+        forecast_risk=forecast_result.forecast_risk,
+        forecast_recommendation=forecast_result.forecast_recommendation,
+        ml_prediction=forecast_result.ml_prediction,
         dry_soon_label=dry_soon_label,
         notification_status=notification_status,
         debug_status=debug_status,
@@ -189,39 +212,52 @@ def log_pump_reason(reading):
         return
     if reading.soil_status == "DRY":
         log_event("PUMP_ON_DRY", "soil is dry", DEBUG_MODE)
-    elif reading.ml_prediction == "Dry Soon":
-        log_event("PUMP_ON_ML_DRY_SOON", "ML predicts dry soon", DEBUG_MODE)
+    elif reading.forecast_risk == "Dry Forecast":
+        log_event("PUMP_ON_FORECAST_DRY", "forecast predicts future dry soil", DEBUG_MODE)
+
+
+def clean_number(value):
+    if value is None:
+        return None
+    try:
+        if value != value:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def run_cycle(gpio, dht, soil_sensor, oled, image, draw, font, model_bundle, favoriot_config, telegram_config):
-    previous_soil_value = read_latest_soil_value(CSV_FILE)
-
     if SIMULATION_MODE:
         temperature, humidity, soil_value = simulated_sensor_values()
     else:
         temperature, humidity, soil_value = read_hardware_values(dht, soil_sensor)
 
-    base_soil_status = classify_soil(soil_value, dry_threshold=DRY_PERCENT, wet_threshold=WET_PERCENT)
-    base_pump_status = decide_pump_status(base_soil_status)
-    moisture_change_rate = calculate_moisture_change_rate(soil_value, previous_soil_value)
-    ml_prediction = predict_dryness(
+    timestamp = datetime.now()
+    history = load_forecast_history(CSV_FILE)
+    forecast_history = append_current_reading(history, timestamp, temperature, humidity, soil_value)
+    enriched_history = enrich_forecast_features(forecast_history)
+    latest_features = enriched_history.iloc[-1].to_dict() if not enriched_history.empty else {}
+    forecast_result = forecast_soil_moisture(
         model_bundle,
-        soil_value=soil_value,
-        temperature=temperature,
-        humidity=humidity,
-        previous_soil_value=previous_soil_value,
-        moisture_change_rate=moisture_change_rate,
-        pump_status=base_pump_status,
+        forecast_history,
+        horizons_hours=FORECAST_HORIZONS_HOURS,
+        recent_average_hours=FORECAST_RECENT_AVERAGE_HOURS,
+        dry_threshold=FORECAST_DRY_PERCENT,
+        control_mode=ML_CONTROL_MODE,
     )
+    if not model_bundle.is_ready and len(enriched_history.dropna(subset=["soil_value"])) < FORECAST_MIN_ROWS:
+        forecast_result.status_code = FORECAST_NOT_ENOUGH_DATA
 
     reading = build_reading_from_values(
-        timestamp=datetime.now(),
+        timestamp=timestamp,
         temperature=temperature,
         humidity=humidity,
         soil_value=soil_value,
-        previous_soil_value=previous_soil_value,
-        ml_prediction=ml_prediction,
-        ml_control_mode=ML_CONTROL_MODE,
+        latest_features=latest_features,
+        forecast_result=forecast_result,
+        control_mode=ML_CONTROL_MODE,
+        debug_status=forecast_result.status_code,
     )
 
     risk_events = detect_risk_events(reading)
@@ -235,7 +271,7 @@ def run_cycle(gpio, dht, soil_sensor, oled, image, draw, font, model_bundle, fav
     reading = replace(
         reading,
         notification_status=f"{event_text};{telegram_status}",
-        debug_status="OK",
+        debug_status=forecast_result.status_code,
     )
 
     if gpio:
@@ -251,7 +287,11 @@ def run_cycle(gpio, dht, soil_sensor, oled, image, draw, font, model_bundle, fav
     print("Time:", reading.timestamp.strftime("%Y-%m-%d %H:%M:%S"))
     print("Soil moisture:", round(reading.soil_value, 1), "%")
     print("Soil status:", reading.soil_status)
-    print("ML prediction:", reading.ml_prediction)
+    print("Forecast 4h:", reading.forecast_soil_4hr)
+    print("Forecast 6h:", reading.forecast_soil_6hr)
+    print("Forecast 8h:", reading.forecast_soil_8hr)
+    print("Forecast risk:", reading.forecast_risk)
+    print("Recommendation:", reading.forecast_recommendation)
     print("Pump:", reading.pump_status)
     print("Notification:", reading.notification_status)
     if reading.temperature is None or reading.humidity is None:
@@ -265,7 +305,7 @@ def main():
     ensure_csv_header(CSV_FILE)
     favoriot_config = load_favoriot_config()
     telegram_config = telegram_config_from_env()
-    model_bundle = load_or_train_model(MODEL_PATH, TRAINING_CSV_FILE)
+    model_bundle = load_forecast_model(FORECAST_MODEL_PATH)
 
     diagnostics = build_startup_diagnostics(
         dht_pin=DHT_PIN,
@@ -274,15 +314,19 @@ def main():
         csv_path=CSV_FILE,
         favoriot_config=favoriot_config,
         telegram_config=telegram_config,
-        model_path=MODEL_PATH,
+        model_path=FORECAST_MODEL_PATH,
         simulation_mode=SIMULATION_MODE,
     )
+    if model_bundle.status_code == FORECAST_MODEL_MISSING:
+        diagnostics["FORECAST_MODEL"] = FORECAST_MODEL_MISSING
     debug_status = debug_status_from_diagnostics(diagnostics)
 
     print("Smart plant system started. Press Ctrl+C to stop.")
     print(f"CSV file: {CSV_FILE}")
     print(f"Mode: {'SIMULATION' if SIMULATION_MODE else 'HARDWARE'}")
-    print(f"ML model: {model_bundle.status_code}")
+    print(f"Forecast model: {model_bundle.status_code}")
+    print(f"Forecast horizons: {FORECAST_HORIZONS_HOURS} hours")
+    print(f"Forecast minimum training rows: {FORECAST_MIN_ROWS}")
     print(f"Startup diagnostics: {diagnostics}")
     print(f"Debug status: {debug_status}")
 

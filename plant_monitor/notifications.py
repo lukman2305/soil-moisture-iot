@@ -21,7 +21,9 @@ class TelegramConfig:
 
 def detect_risk_events(reading):
     events = []
-    if reading.ml_prediction == "Dry Soon":
+    if getattr(reading, "forecast_risk", "") == "Dry Forecast" or reading.ml_prediction == "Forecast Dry":
+        events.append("Forecast Dry")
+    elif reading.ml_prediction == "Dry Soon":
         events.append("Dry Soon")
     if reading.soil_status == "DRY":
         events.append("DRY")
@@ -41,7 +43,11 @@ def format_notification_message(events, reading):
         f"Temp: {reading.temperature if reading.temperature is not None else 'N/A'} C\n"
         f"Humidity: {reading.humidity if reading.humidity is not None else 'N/A'}%\n"
         f"Pump: {reading.pump_status}\n"
-        f"ML: {reading.ml_prediction}"
+        f"ML: {reading.ml_prediction}\n"
+        f"Forecast 4h: {getattr(reading, 'forecast_soil_4hr', None) if getattr(reading, 'forecast_soil_4hr', None) is not None else 'N/A'}%\n"
+        f"Forecast 6h: {getattr(reading, 'forecast_soil_6hr', None) if getattr(reading, 'forecast_soil_6hr', None) is not None else 'N/A'}%\n"
+        f"Forecast 8h: {getattr(reading, 'forecast_soil_8hr', None) if getattr(reading, 'forecast_soil_8hr', None) is not None else 'N/A'}%\n"
+        f"Recommendation: {getattr(reading, 'forecast_recommendation', 'N/A')}"
     )
 
 

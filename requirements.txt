@@ -16,4 +16,5 @@ requests
 streamlit
 pandas
 scikit-learn
+statsmodels
 joblib
