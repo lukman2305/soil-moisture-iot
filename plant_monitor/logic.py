@@ -50,6 +50,26 @@ def decide_pump_status(soil_status):
     return "ON" if soil_status == "DRY" else "OFF"
 
 
+def decide_pump_status_with_ml(soil_status, ml_prediction, control_mode="recommend"):
+    if soil_status == "DRY":
+        return "ON"
+    if soil_status == "WET":
+        return "OFF"
+    if control_mode == "control" and soil_status == "OPTIMAL" and ml_prediction == "Dry Soon":
+        return "ON"
+    return "OFF"
+
+
+def decide_pump_status_with_forecast(soil_status, forecast_risk, control_mode="recommend"):
+    if soil_status == "DRY":
+        return "ON"
+    if soil_status == "WET":
+        return "OFF"
+    if control_mode == "control" and soil_status == "OPTIMAL" and forecast_risk == "Dry Forecast":
+        return "ON"
+    return "OFF"
+
+
 def load_favoriot_config(env=None):
     source = os.environ if env is None else env
     return FavoriotConfig(

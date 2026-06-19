@@ -41,8 +41,25 @@ class PlantMonitorAppTest(unittest.TestCase):
             temperature=29.0,
             humidity=72.0,
             soil_value=24.5,
+            previous_soil_value=30.0,
+            moisture_change_rate=-5.5,
+            vpd=1.273,
+            soil_lag_1=30.0,
+            soil_lag_2=31.0,
+            soil_lag_3=32.0,
+            soil_rolling_mean=28.2,
+            soil_rate_per_hour=-33.0,
             soil_status="DRY",
             pump_status="ON",
+            forecast_soil_4hr=28.0,
+            forecast_soil_6hr=35.0,
+            forecast_soil_8hr=42.0,
+            forecast_risk="Dry Forecast",
+            forecast_recommendation="Recommend watering soon.",
+            ml_prediction="Forecast Dry",
+            dry_soon_label="Dry Soon",
+            notification_status="Forecast Dry,DRY",
+            debug_status="OK",
         )
 
     def test_ensure_csv_header_creates_expected_assignment_columns(self):
@@ -66,7 +83,34 @@ class PlantMonitorAppTest(unittest.TestCase):
             with csv_path.open(newline="") as file:
                 rows = list(csv.reader(file))
 
-        self.assertEqual(rows[1], ["2026-06-12 10:30:00", "29.0", "72.0", "24.5", "DRY", "ON"])
+        self.assertEqual(
+            rows[1],
+            [
+                "2026-06-12 10:30:00",
+                "29.0",
+                "72.0",
+                "24.5",
+                "30.0",
+                "-5.5",
+                "1.3",
+                "30.0",
+                "31.0",
+                "32.0",
+                "28.2",
+                "-33.0",
+                "DRY",
+                "ON",
+                "28.0",
+                "35.0",
+                "42.0",
+                "Dry Forecast",
+                "Recommend watering soon.",
+                "Forecast Dry",
+                "Dry Soon",
+                "Forecast Dry,DRY",
+                "OK",
+            ],
+        )
 
     def test_build_favoriot_payload_matches_dashboard_fields(self):
         payload = build_favoriot_payload("device-default@user", self.sample_reading())
@@ -80,6 +124,13 @@ class PlantMonitorAppTest(unittest.TestCase):
                 "soil_value": 24.5,
                 "soil_status": "DRY",
                 "pump_status": "ON",
+                "forecast_soil_4hr": 28.0,
+                "forecast_soil_6hr": 35.0,
+                "forecast_soil_8hr": 42.0,
+                "forecast_risk": "Dry Forecast",
+                "forecast_recommendation": "Recommend watering soon.",
+                "ml_prediction": "Forecast Dry",
+                "notification_status": "Forecast Dry,DRY",
             },
         )
 
@@ -128,7 +179,7 @@ class PlantMonitorAppTest(unittest.TestCase):
     def test_format_oled_lines_fits_core_status_data(self):
         lines = format_oled_lines(self.sample_reading())
 
-        self.assertEqual(lines, ["SMART PLANT", "Temp: 29.0 C", "Humid: 72.0%", "Soil: 24.5%", "DRY P:ON"])
+        self.assertEqual(lines, ["SMART PLANT", "Temp: 29.0 C", "Humid: 72.0%", "Soil: 24.5%", "F4:28.0 F8:42.0 P:ON"])
 
 
 if __name__ == "__main__":
