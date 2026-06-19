@@ -54,6 +54,7 @@ def load_data(csv_path):
     frame = pd.read_csv(path)
     if "timestamp" in frame.columns:
         frame["timestamp"] = pd.to_datetime(frame["timestamp"], errors="coerce")
+        frame = frame.dropna(subset=["timestamp"]).reset_index(drop=True)
     for column in NUMERIC_COLUMNS:
         if column in frame.columns:
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
@@ -129,22 +130,35 @@ def show_alerts(reading, frame):
         return
 
     events = detect_risk_events(reading)
-    if reading.forecast_risk == FORECAST_RISK_DRY:
-        st.error("Forecast alert: soil moisture may fall below the dry threshold.")
-    elif reading.forecast_risk == FORECAST_UNKNOWN:
-        st.warning("Forecast unavailable. Collect more real sensor rows or train the SARIMAX model.")
-
-    if not events:
+    if not events and reading.forecast_risk != FORECAST_RISK_DRY and reading.forecast_risk != FORECAST_UNKNOWN:
         st.success("No current risk detected.")
         return
 
+    if reading.forecast_risk == FORECAST_UNKNOWN:
+        st.warning("Forecast unavailable. Collect more real sensor rows or train the SARIMAX model.")
+
+    # Determine when it will be dry based on the forecast horizons
+    dry_horizon = ""
+    if reading.forecast_soil_4hr is not None and reading.forecast_soil_4hr < FORECAST_DRY_PERCENT:
+        dry_horizon = " in 4 hours"
+    elif reading.forecast_soil_6hr is not None and reading.forecast_soil_6hr < FORECAST_DRY_PERCENT:
+        dry_horizon = " in 6 hours"
+    elif reading.forecast_soil_8hr is not None and reading.forecast_soil_8hr < FORECAST_DRY_PERCENT:
+        dry_horizon = " in 8 hours"
+        
     for event in events:
-        if event in {"DRY", "Dry Soon"}:
-            st.error(f"Alert: {event}")
+        if event in {"DRY", "Dry Soon", "Forecast Dry"}:
+            continue # We will handle this in the combined alert
         elif event == "WET":
             st.warning("Alert: WET / overwatering risk")
         else:
             st.warning(f"Alert: {event}")
+
+    # Display a single, combined dry alert if needed
+    if "DRY" in events:
+        st.error("🚨 Alert: Soil is currently DRY!")
+    elif reading.forecast_risk == FORECAST_RISK_DRY or "Forecast Dry" in events or "Dry Soon" in events:
+        st.error(f"⚠️ Forecast Alert: Soil moisture is predicted to fall below the dry threshold{dry_horizon}.")
 
 
 @st.cache_resource(show_spinner=False)
@@ -195,7 +209,11 @@ def show_charts(frame):
 
 
 def format_forecast_value(value):
-    return "N/A" if value is None or pd.isna(value) else f"{float(value):.1f}%"
+    if value is None or pd.isna(value):
+        return "N/A"
+    val = float(value)
+    state = "DRY" if val < FORECAST_DRY_PERCENT else "OPTIMAL"
+    return f"{val:.1f}% ({state})"
 
 
 def forecast_chart_frame(reading):
@@ -359,14 +377,22 @@ def render_dashboard(refresh_seconds):
     show_alerts(reading, frame)
 
     if reading:
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        col1.metric("Soil Moisture", f"{reading.soil_value:.1f}%")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Soil Moisture", f"{reading.soil_value:.1f}% ({reading.soil_status})")
         col2.metric("Forecast 4h", format_forecast_value(reading.forecast_soil_4hr))
         col3.metric("Forecast 6h", format_forecast_value(reading.forecast_soil_6hr))
         col4.metric("Forecast 8h", format_forecast_value(reading.forecast_soil_8hr))
-        col5.metric("Recommendation", reading.forecast_risk)
-        col6.metric("Pump", reading.pump_status)
-        st.caption(reading.forecast_recommendation)
+        col5.metric("Pump", reading.pump_status)
+
+        accuracy_path = MODEL_PATH.parent / "model_accuracy.json"
+        if accuracy_path.exists():
+            try:
+                import json
+                with open(accuracy_path, "r") as f:
+                    acc = json.load(f)
+                    st.caption(f"**Model Accuracy (Test Data)**: MAE ±{acc['mae']}%  |  RMSE {acc['rmse']}%")
+            except Exception:
+                pass
 
     dashboard_tab, data_tab, debug_tab = st.tabs(["Dashboard", "Recent Data", "Debug"])
     with dashboard_tab:
