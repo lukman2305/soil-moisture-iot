@@ -11,8 +11,25 @@ CSV_HEADER = [
     "temperature",
     "humidity",
     "soil_value",
+    "previous_soil_value",
+    "moisture_change_rate",
+    "vpd",
+    "soil_lag_1",
+    "soil_lag_2",
+    "soil_lag_3",
+    "soil_rolling_mean",
+    "soil_rate_per_hour",
     "soil_status",
     "pump_status",
+    "forecast_soil_4hr",
+    "forecast_soil_6hr",
+    "forecast_soil_8hr",
+    "forecast_risk",
+    "forecast_recommendation",
+    "ml_prediction",
+    "dry_soon_label",
+    "notification_status",
+    "debug_status",
 ]
 
 
@@ -22,13 +39,41 @@ class SensorReading:
     temperature: float
     humidity: float
     soil_value: float
-    soil_status: str
-    pump_status: str
+    previous_soil_value: float = None
+    moisture_change_rate: float = 0.0
+    vpd: float = None
+    soil_lag_1: float = None
+    soil_lag_2: float = None
+    soil_lag_3: float = None
+    soil_rolling_mean: float = None
+    soil_rate_per_hour: float = None
+    soil_status: str = ""
+    pump_status: str = "OFF"
+    forecast_soil_4hr: float = None
+    forecast_soil_6hr: float = None
+    forecast_soil_8hr: float = None
+    forecast_risk: str = "Unknown"
+    forecast_recommendation: str = "Forecast unavailable."
+    ml_prediction: str = "Unknown"
+    dry_soon_label: str = ""
+    notification_status: str = ""
+    debug_status: str = "OK"
 
 
 def ensure_csv_header(csv_path):
     path = Path(csv_path)
     if path.exists() and path.stat().st_size > 0:
+        with path.open(newline="") as file:
+            reader = csv.DictReader(file)
+            rows = list(reader)
+            existing_header = reader.fieldnames or []
+        if all(column in existing_header for column in CSV_HEADER):
+            return
+        with path.open(mode="w", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=CSV_HEADER)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({column: row.get(column, "") for column in CSV_HEADER})
         return
 
     with path.open(mode="w", newline="") as file:
@@ -53,10 +98,45 @@ def write_csv_reading(csv_path, reading):
                 _csv_value(reading.temperature),
                 _csv_value(reading.humidity),
                 _csv_value(reading.soil_value),
+                _csv_value(reading.previous_soil_value),
+                _csv_value(reading.moisture_change_rate),
+                _csv_value(reading.vpd),
+                _csv_value(reading.soil_lag_1),
+                _csv_value(reading.soil_lag_2),
+                _csv_value(reading.soil_lag_3),
+                _csv_value(reading.soil_rolling_mean),
+                _csv_value(reading.soil_rate_per_hour),
                 reading.soil_status,
                 reading.pump_status,
+                _csv_value(reading.forecast_soil_4hr),
+                _csv_value(reading.forecast_soil_6hr),
+                _csv_value(reading.forecast_soil_8hr),
+                reading.forecast_risk,
+                reading.forecast_recommendation,
+                reading.ml_prediction,
+                reading.dry_soon_label,
+                reading.notification_status,
+                reading.debug_status,
             ]
         )
+
+
+def read_latest_soil_value(csv_path):
+    path = Path(csv_path)
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+
+    with path.open(newline="") as file:
+        rows = list(csv.DictReader(file))
+
+    for row in reversed(rows):
+        value = row.get("soil_value")
+        if value not in (None, ""):
+            try:
+                return float(value)
+            except ValueError:
+                continue
+    return None
 
 
 def build_favoriot_payload(device_developer_id, reading):
@@ -68,6 +148,13 @@ def build_favoriot_payload(device_developer_id, reading):
             "soil_value": round(reading.soil_value, 1),
             "soil_status": reading.soil_status,
             "pump_status": reading.pump_status,
+            "forecast_soil_4hr": reading.forecast_soil_4hr,
+            "forecast_soil_6hr": reading.forecast_soil_6hr,
+            "forecast_soil_8hr": reading.forecast_soil_8hr,
+            "forecast_risk": reading.forecast_risk,
+            "forecast_recommendation": reading.forecast_recommendation,
+            "ml_prediction": reading.ml_prediction,
+            "notification_status": reading.notification_status,
         },
     }
 
@@ -115,5 +202,11 @@ def format_oled_lines(reading):
         lines.append(f"Humid: {reading.humidity}%")
 
     lines.append(f"Soil: {round(reading.soil_value, 1)}%")
-    lines.append(f"{reading.soil_status} P:{reading.pump_status}")
+    if reading.forecast_soil_4hr is not None or reading.forecast_soil_8hr is not None:
+        f4 = "NA" if reading.forecast_soil_4hr is None else round(reading.forecast_soil_4hr, 1)
+        f8 = "NA" if reading.forecast_soil_8hr is None else round(reading.forecast_soil_8hr, 1)
+        lines.append(f"F4:{f4} F8:{f8} P:{reading.pump_status}")
+    else:
+        prediction = reading.ml_prediction if reading.ml_prediction != "Not Dry Soon" else "OK"
+        lines.append(f"ML:{prediction} P:{reading.pump_status}")
     return lines

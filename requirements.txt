@@ -11,3 +11,10 @@ Pillow
 
 # Favoriot REST API
 requests
+
+# Streamlit dashboard and machine learning
+streamlit
+pandas
+scikit-learn
+statsmodels
+joblib

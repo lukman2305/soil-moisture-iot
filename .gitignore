@@ -4,3 +4,6 @@ __pycache__/
 
 .env
 sensor_readings.csv
+.telegram_state.json
+models/*.joblib
+data/*.csv
