@@ -46,7 +46,7 @@ BASE_DIR = Path(__file__).resolve().parent
 load_env_file(BASE_DIR / ".env")
 
 CSV_FILE = Path(os.getenv("CSV_FILE", str(BASE_DIR / "plant_data.csv")))
-RELAY_PIN = int(os.getenv("RELAY_PIN", "18"))
+RELAY_PIN = int(os.getenv("RELAY_PIN", "16"))
 SOIL_CHANNEL = int(os.getenv("SOIL_CHANNEL", "0"))
 DHT_PIN = os.getenv("DHT_PIN", "D4").upper()
 READ_INTERVAL_SECONDS = read_interval_seconds()
@@ -54,6 +54,10 @@ ML_CONTROL_MODE = ml_control_mode()
 DEBUG_MODE = debug_mode_enabled()
 SIMULATION_MODE = simulation_mode_enabled()
 RUN_ONCE = run_once_enabled()
+
+PUMP_SELF_TEST = os.getenv("PUMP_SELF_TEST", "false").lower() == "true"
+PUMP_SELF_TEST_ON_SECONDS = float(os.getenv("PUMP_SELF_TEST_ON_SECONDS", "5"))
+PUMP_SELF_TEST_OFF_SECONDS = float(os.getenv("PUMP_SELF_TEST_OFF_SECONDS", "2"))
 
 FORECAST_MODEL_PATH = Path(os.getenv("FORECAST_MODEL_PATH", str(BASE_DIR / "models" / "soil_forecast_sarimax.joblib")))
 FORECAST_MIN_ROWS = int(os.getenv("FORECAST_MIN_ROWS", "24"))
@@ -192,6 +196,24 @@ def build_reading_from_values(
         debug_status=debug_status,
     )
 
+def run_pump_self_test(gpio):
+    if not gpio:
+        return
+
+    print("Pump self-test started.")
+
+    try:
+        print("Pump ON")
+        gpio.output(RELAY_PIN, gpio.LOW)
+        time.sleep(PUMP_SELF_TEST_ON_SECONDS)
+
+        print("Pump OFF")
+        gpio.output(RELAY_PIN, gpio.HIGH)
+        time.sleep(PUMP_SELF_TEST_OFF_SECONDS)
+
+    finally:
+        gpio.output(RELAY_PIN, gpio.HIGH)
+        print("Pump self-test finished. Pump forced OFF.")
 
 def setup_hardware():
     import adafruit_dht
@@ -347,6 +369,9 @@ def main():
     if not SIMULATION_MODE:
         gpio, dht, soil_sensor, oled, image, draw, font = setup_hardware()
 
+        if PUMP_SELF_TEST:
+            run_pump_self_test(gpio)
+            
     try:
         while True:
             try:
