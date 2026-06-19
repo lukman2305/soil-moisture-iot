@@ -112,14 +112,15 @@ def show_oled(oled, image, draw, font, reading):
         draw.text((0, index * 12), line, font=font, fill=255)
     oled.image(image)
     oled.show()
-
-
+    
 def read_dht11(dht):
-    try:
-        return dht.temperature, dht.humidity
-    except RuntimeError as exc:
-        log_event("DHT_READ_FAILED", str(exc), DEBUG_MODE)
-        return None, None
+    for _ in range(5):
+        try:
+            return dht.temperature, dht.humidity
+        except RuntimeError as exc:
+            log_event("DHT_READ_FAILED", str(exc), DEBUG_MODE)
+            time.sleep(0.5)
+
 
 def read_soil_smoothed(soil_sensor, num_samples=10, delay=0.05):
     # 1. Smoothing / Averaging Data Filter
