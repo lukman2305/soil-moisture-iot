@@ -8,3 +8,7 @@ sensor_readings.csv
 .telegram_state.json
 models/*.joblib
 data/*.csv
+
+# Security — never commit passwords or sensor DB
+auth_config.yaml
+sensor_data.db

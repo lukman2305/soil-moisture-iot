@@ -24,6 +24,7 @@ load_env_file(BASE_DIR / ".env")
 
 CSV_FILE = Path(os.getenv("CSV_FILE", str(BASE_DIR / "plant_data.csv")))
 MODEL_PATH = Path(os.getenv("FORECAST_MODEL_PATH", str(BASE_DIR / "models" / "soil_forecast_sarimax.joblib")))
+AUTH_CONFIG_PATH = BASE_DIR / "auth_config.yaml"
 FORECAST_MIN_ROWS = int(os.getenv("FORECAST_MIN_ROWS", "4"))
 FORECAST_RECENT_AVERAGE_HOURS = float(os.getenv("FORECAST_RECENT_AVERAGE_HOURS", "1"))
 FORECAST_DRY_PERCENT = float(os.getenv("FORECAST_DRY_PERCENT", "30"))
@@ -46,6 +47,86 @@ NUMERIC_COLUMNS = [
 ]
 
 
+# ── Authentication (custom — no streamlit-authenticator needed) ─────────────
+
+def _load_auth_config() -> dict:
+    """Load and validate auth_config.yaml. Shows an error and stops if missing."""
+    try:
+        import yaml  # noqa: PLC0415
+    except ImportError:
+        st.error("⚠️ PyYAML not installed. Run: pip install PyYAML bcrypt")
+        st.stop()
+
+    if not AUTH_CONFIG_PATH.exists():
+        st.error(
+            f"⚠️ `auth_config.yaml` not found. "
+            "Run `python generate_passwords.py` on the Pi to create users."
+        )
+        st.stop()
+
+    with open(AUTH_CONFIG_PATH) as f:
+        return yaml.safe_load(f) or {}
+
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    try:
+        import bcrypt  # noqa: PLC0415
+        return bcrypt.checkpw(plain.encode(), hashed.encode())
+    except Exception:
+        return False
+
+
+def require_login() -> tuple[str, str]:
+    """
+    Show a login form and block access until the user authenticates.
+    Auth state is stored in st.session_state for the browser session.
+    Returns (name, username) of the logged-in user.
+    """
+    # Already logged in this session?
+    if st.session_state.get("authenticated"):
+        return st.session_state["user_name"], st.session_state["username"]
+
+    config = _load_auth_config()
+    users = config.get("credentials", {}).get("usernames", {})
+
+    # ── Login form ──────────────────────────────────────────────────────────
+    st.markdown("## 🌱 Soil Monitor — Login")
+    with st.form("login_form"):
+        username_input = st.text_input("Username").strip().lower()
+        password_input = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login")
+
+    if not submitted:
+        st.stop()
+
+    # ── Validate credentials ────────────────────────────────────────────────
+    user_info = users.get(username_input)
+    if (
+        user_info is None
+        or not isinstance(user_info, dict)
+        or not _verify_password(password_input, user_info.get("password", ""))
+    ):
+        st.error("❌ Username or password is incorrect")
+        st.stop()
+
+    # ── Store session ───────────────────────────────────────────────────────
+    st.session_state["authenticated"] = True
+    st.session_state["username"] = username_input
+    st.session_state["user_name"] = user_info.get("name", username_input)
+    st.rerun()
+
+
+def logout():
+    st.session_state["authenticated"] = False
+    st.session_state["username"] = ""
+    st.session_state["user_name"] = ""
+    st.rerun()
+
+
+
+
+# ── Data loading ────────────────────────────────────────────────────────────
+
 def load_data(csv_path):
     path = Path(csv_path)
     if not path.exists() or path.stat().st_size == 0:
@@ -64,7 +145,7 @@ def load_data(csv_path):
 def streamlit_refresh_seconds(env=None):
     source = os.environ if env is None else env
     try:
-        value = int(source.get("STREAMLIT_REFRESH_SECONDS", "10"))
+        value = int(source.get("STREAMLIT_REFRESH_SECONDS", "2"))
     except ValueError:
         return 0
     return max(0, value)
@@ -116,8 +197,10 @@ def csv_health(frame):
 
     latest_time = frame.iloc[-1]["timestamp"]
     age_seconds = (pd.Timestamp.now() - latest_time).total_seconds()
-    stale_after = read_interval_seconds() * 2
+    stale_after = max(120, read_interval_seconds() * 3)
     if age_seconds > stale_after:
+        if age_seconds < 60:
+            return f"CSV stale: latest row is {int(age_seconds)} seconds old"
         return f"CSV stale: latest row is {int(age_seconds // 60)} minutes old"
     return "CSV fresh"
 
@@ -145,10 +228,10 @@ def show_alerts(reading, frame):
         dry_horizon = " in 6 hours"
     elif reading.forecast_soil_8hr is not None and reading.forecast_soil_8hr < FORECAST_DRY_PERCENT:
         dry_horizon = " in 8 hours"
-        
+
     for event in events:
         if event in {"DRY", "Dry Soon", "Forecast Dry"}:
-            continue # We will handle this in the combined alert
+            continue  # handled in the combined alert below
         elif event == "WET":
             st.warning("Alert: WET / overwatering risk")
         else:
@@ -197,15 +280,41 @@ def chart_sections(frame):
     ]
 
 
-def show_charts(frame):
-    if frame.empty or "timestamp" not in frame.columns:
-        st.info("No chart data available yet.")
-        return
+def show_charts(frame, chart_placeholder):
+    """
+    Render all trend charts inside `chart_placeholder`.
+    Using a single placeholder prevents the entire chart section from
+    disappearing and reappearing on every fragment rerun (no more flash).
+    """
+    with chart_placeholder.container():
+        if frame.empty or "timestamp" not in frame.columns:
+            st.info("No chart data available yet.")
+            return
 
-    chart_frame = frame.dropna(subset=["timestamp"]).set_index("timestamp")
-    for title, columns in chart_sections(chart_frame):
-        st.subheader(title)
-        st.line_chart(chart_frame[columns])
+        import plotly.graph_objects as go
+
+        chart_frame = frame.dropna(subset=["timestamp"]).set_index("timestamp")
+        for title, columns in chart_sections(chart_frame):
+            st.subheader(title)
+            existing_columns = [c for c in columns if c in chart_frame.columns]
+            if not existing_columns:
+                continue
+            fig = go.Figure()
+            for col in existing_columns:
+                fig.add_trace(go.Scatter(
+                    x=chart_frame.index,
+                    y=chart_frame[col],
+                    mode="lines",
+                    name=col,
+                ))
+            fig.update_layout(
+                title=title,
+                xaxis_title="Time",
+                yaxis_title="Value",
+                height=300,
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
 
 def format_forecast_value(value):
@@ -216,69 +325,57 @@ def format_forecast_value(value):
     return f"{val:.1f}% ({state})"
 
 
-def forecast_chart_frame(reading):
-    df = pd.DataFrame(
-        {
-            "Soil Moisture": [
-                reading.soil_value,
-                reading.forecast_soil_4hr,
-                reading.forecast_soil_6hr,
-                reading.forecast_soil_8hr,
-            ],
-            "Dry Threshold": [FORECAST_DRY_PERCENT] * 4,
-        },
-        index=[0, 1, 2, 3],
-    )
-    return df
+def show_forecast_chart(reading, forecast_result, forecast_placeholder):
+    """
+    Render the forecast chart inside `forecast_placeholder` to avoid flash.
+    """
+    with forecast_placeholder.container():
+        if not reading:
+            return
+        if forecast_result is None:
+            st.info("Forecast chart will appear after the SARIMAX model is trained and enough rows are available.")
+            return
 
+        import plotly.graph_objects as go
 
-def show_forecast_chart(reading, forecast_result=None):
-    if not reading:
-        return
-    if forecast_result is None:
-        st.info("Forecast chart will appear after the SARIMAX model is trained and enough rows are available.")
-        return
+        chart_frame = pd.DataFrame(
+            {
+                "Soil Moisture": [
+                    reading.soil_value,
+                    forecast_result.forecast_soil_4hr,
+                    forecast_result.forecast_soil_6hr,
+                    forecast_result.forecast_soil_8hr,
+                ],
+                "Dry Threshold": [FORECAST_DRY_PERCENT] * 4,
+            },
+            index=["Now", "4h", "6h", "8h"],
+        )
 
-    import plotly.graph_objects as go
-
-    chart_frame = pd.DataFrame(
-        {
-            "Soil Moisture": [
-                reading.soil_value,
-                forecast_result.forecast_soil_4hr,
-                forecast_result.forecast_soil_6hr,
-                forecast_result.forecast_soil_8hr,
-            ],
-            "Dry Threshold": [FORECAST_DRY_PERCENT] * 4,
-        },
-        index=["Now", "4h", "6h", "8h"],
-    )
-
-    time_labels = list(chart_frame.index)
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=time_labels,
-        y=chart_frame["Soil Moisture"],
-        mode="lines+markers",
-        name="Soil Moisture",
-        line=dict(color="#1f77b4", width=2),
-        marker=dict(size=8),
-    ))
-    fig.add_trace(go.Scatter(
-        x=time_labels,
-        y=chart_frame["Dry Threshold"],
-        mode="lines",
-        name="Dry Threshold",
-        line=dict(color="#ff7f0e", width=2, dash="dash"),
-    ))
-    fig.update_layout(
-        title="Current and Forecast Soil Moisture",
-        xaxis_title="Time",
-        yaxis_title="Soil Moisture (%)",
-        height=400,
-        hovermode="x unified",
-    )
-    st.plotly_chart(fig)
+        time_labels = list(chart_frame.index)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=time_labels,
+            y=chart_frame["Soil Moisture"],
+            mode="lines+markers",
+            name="Soil Moisture",
+            line=dict(color="#1f77b4", width=2),
+            marker=dict(size=8),
+        ))
+        fig.add_trace(go.Scatter(
+            x=time_labels,
+            y=chart_frame["Dry Threshold"],
+            mode="lines",
+            name="Dry Threshold",
+            line=dict(color="#ff7f0e", width=2, dash="dash"),
+        ))
+        fig.update_layout(
+            title="Current and Forecast Soil Moisture",
+            xaxis_title="Time",
+            yaxis_title="Soil Moisture (%)",
+            height=400,
+            hovermode="x unified",
+        )
+        st.plotly_chart(fig)
 
 
 def show_debug(frame):
@@ -314,15 +411,14 @@ def show_debug(frame):
     st.write("Recent average window (hours):", FORECAST_RECENT_AVERAGE_HOURS)
     if not frame.empty:
         latest = frame.iloc[-1]
-        st.write("Latest VPD:", latest.get("vpd", "N/A"))
-        st.write(
-            "Latest forecasts:",
-            {
-                "4h": latest.get("forecast_soil_4hr", "N/A"),
-                "6h": latest.get("forecast_soil_6hr", "N/A"),
-                "8h": latest.get("forecast_soil_8hr", "N/A"),
-            },
-        )
+        st.write("Latest VPD:", str(latest.get("vpd", "N/A")))
+        st.json({
+            "Latest forecasts": {
+                "4h": str(latest.get("forecast_soil_4hr", "N/A")),
+                "6h": str(latest.get("forecast_soil_6hr", "N/A")),
+                "8h": str(latest.get("forecast_soil_8hr", "N/A")),
+            }
+        })
 
     st.subheader("Latest CSV Row")
     if frame.empty:
@@ -342,7 +438,7 @@ def show_debug(frame):
     )
 
 
-def render_dashboard(refresh_seconds):
+def render_dashboard(refresh_seconds, username):
     frame = load_data(CSV_FILE)
     reading = latest_reading(frame)
     forecast_result = forecast_from_history(frame)
@@ -374,42 +470,92 @@ def render_dashboard(refresh_seconds):
             debug_status=reading.debug_status,
         )
 
-    show_alerts(reading, frame)
-
-    if reading:
-        col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("Soil Moisture", f"{reading.soil_value:.1f}% ({reading.soil_status})")
-        col2.metric("Forecast 4h", format_forecast_value(reading.forecast_soil_4hr))
-        col3.metric("Forecast 6h", format_forecast_value(reading.forecast_soil_6hr))
-        col4.metric("Forecast 8h", format_forecast_value(reading.forecast_soil_8hr))
-        col5.metric("Pump", reading.pump_status)
-
-        accuracy_path = MODEL_PATH.parent / "model_accuracy.json"
-        if accuracy_path.exists():
-            try:
-                import json
-                with open(accuracy_path, "r") as f:
-                    acc = json.load(f)
-                    st.caption(f"**Model Accuracy (Test Data)**: MAE ±{acc['mae']}%  |  RMSE {acc['rmse']}%")
-            except Exception:
-                pass
+    alerts_placeholder = st.empty()
+    metrics_placeholder = st.empty()
 
     dashboard_tab, data_tab, debug_tab = st.tabs(["Dashboard", "Recent Data", "Debug"])
+
+    # ── Pre-create stable placeholders so charts update IN-PLACE (no flash) ──
+    # These placeholders are created once outside the fragment cycle.
     with dashboard_tab:
-        show_forecast_chart(reading, forecast_result)
-        show_charts(frame)
+        forecast_placeholder = st.empty()
+        charts_placeholder = st.empty()
     with data_tab:
-        if frame.empty:
-            st.info("No CSV readings found yet.")
-        else:
-            st.dataframe(frame.tail(50), width="stretch")
+        data_placeholder = st.empty()
     with debug_tab:
-        show_debug(frame)
+        debug_placeholder = st.empty()
+
+    def draw_content():
+        fresh_frame = load_data(CSV_FILE)
+        fresh_reading = latest_reading(fresh_frame)
+        fresh_forecast = forecast_from_history(fresh_frame)
+
+        with alerts_placeholder.container():
+            show_alerts(fresh_reading, fresh_frame)
+
+        with metrics_placeholder.container():
+            if fresh_reading:
+                col1, col2, col3, col4, col5 = st.columns(5)
+                col1.metric("Soil Moisture", f"{fresh_reading.soil_value:.1f}% ({fresh_reading.soil_status})")
+                col2.metric("Forecast 4h", format_forecast_value(fresh_reading.forecast_soil_4hr))
+                col3.metric("Forecast 6h", format_forecast_value(fresh_reading.forecast_soil_6hr))
+                col4.metric("Forecast 8h", format_forecast_value(fresh_reading.forecast_soil_8hr))
+                col5.metric("Pump", fresh_reading.pump_status)
+
+                accuracy_path = MODEL_PATH.parent / "model_accuracy.json"
+                if accuracy_path.exists():
+                    try:
+                        import json
+                        with open(accuracy_path, "r") as f:
+                            acc = json.load(f)
+                            st.caption(f"**Model Accuracy (Test Data)**: MAE ±{acc['mae']}%  |  RMSE {acc['rmse']}%")
+                    except Exception:
+                        pass
+
+        show_forecast_chart(fresh_reading, fresh_forecast, forecast_placeholder)
+        show_charts(fresh_frame, charts_placeholder)
+
+        with data_placeholder.container():
+            if fresh_frame.empty:
+                st.info("No CSV readings found yet.")
+            else:
+                st.markdown(fresh_frame.tail(50).to_html(index=False), unsafe_allow_html=True)
+
+        with debug_placeholder.container():
+            show_debug(fresh_frame)
+
+    if refresh_seconds > 0:
+        @st.fragment(run_every=refresh_seconds)
+        def live_content():
+            draw_content()
+        live_content()
+    else:
+        draw_content()
 
 
 def main():
     st.set_page_config(page_title="Smart Plant Dashboard", page_icon=":seedling:", layout="wide")
     refresh_seconds = streamlit_refresh_seconds()
+
+    # ── Sidebar: show login status ─────────────────────────────────────────
+    st.sidebar.title("🌱 Soil Monitor")
+
+    # Require login before showing anything
+    name, username = require_login()
+
+    st.sidebar.success(f"Logged in as **{name}**")
+    st.sidebar.caption(f"Username: `{username}`")
+    if st.sidebar.button("Logout"):
+        logout()
+    st.sidebar.divider()
+    pause_updates = st.sidebar.checkbox("⏸️ Pause Live Updates", value=False, help="Check this to temporarily stop the dashboard from redrawing so you can zoom and interact with the charts.")
+    if pause_updates:
+        refresh_seconds = 0
+
+    st.sidebar.caption(
+        f"Live updates: {'off' if refresh_seconds <= 0 else str(refresh_seconds) + 's'}"
+    )
+
     st.title("Smart Plant Monitoring Dashboard")
     st.caption(
         "Predictive irrigation dashboard for soil dryness risk, notifications, and debugging. "
@@ -417,11 +563,7 @@ def main():
         f"Forecast source: {'live SARIMAX model' if load_forecast_bundle().is_ready else 'CSV fallback only'}."
     )
 
-    @st.fragment(run_every=refresh_seconds if refresh_seconds > 0 else None)
-    def live_dashboard():
-        render_dashboard(refresh_seconds)
-
-    live_dashboard()
+    render_dashboard(refresh_seconds, username)
 
 
 if __name__ == "__main__":

@@ -18,3 +18,12 @@ pandas
 scikit-learn
 statsmodels
 joblib
+
+# Streamlit login / authentication (Option A security)
+streamlit-authenticator
+PyYAML
+bcrypt
+
+# Grafana data backend (no extra pip package needed — uses built-in sqlite3)
+# plotly is needed for Streamlit charts
+plotly
