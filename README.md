@@ -184,6 +184,9 @@ Run Streamlit dashboard in another terminal:
 streamlit run streamlit_app.py --server.address 0.0.0.0
 ```
 
+> [!TIP]
+> **Live Demo Mode**: For presentations, you can set `READ_INTERVAL_SECONDS=2` and `STREAMLIT_REFRESH_SECONDS=2` in your `.env` file to force the system to update every 2 seconds. Because this aggressive refreshing makes it impossible to zoom in on charts, you can use the **⏸️ Pause Live Updates** checkbox in the sidebar to freeze the dashboard dynamically!
+
 Open:
 
 ```text
