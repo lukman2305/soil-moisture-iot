@@ -64,12 +64,11 @@ SAVE_DATA = save_data_enabled()
 
 # Route CSV to a separate file during simulation or demo so plant_data.csv stays clean
 if SIMULATION_MODE:
-    _default_csv = "sim_data.csv"
+    CSV_FILE = BASE_DIR / "sim_data.csv"
 elif DEMO_MODE:
-    _default_csv = "demo_data.csv"
+    CSV_FILE = BASE_DIR / "demo_data.csv"
 else:
-    _default_csv = "plant_data.csv"
-CSV_FILE = Path(os.getenv("CSV_FILE", str(BASE_DIR / _default_csv)))
+    CSV_FILE = Path(os.getenv("CSV_FILE", str(BASE_DIR / "plant_data.csv")))
 DB_FILE = Path(os.getenv("DB_FILE", str(BASE_DIR / "sensor_data.db")))
 PUMP_DURATION_SECONDS = pump_duration_seconds()
 PUMP_FORECAST_DURATION_SECONDS = pump_forecast_duration_seconds()
