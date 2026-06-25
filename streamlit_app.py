@@ -22,7 +22,16 @@ from plant_monitor.settings import read_interval_seconds, telegram_config_from_e
 BASE_DIR = Path(__file__).resolve().parent
 load_env_file(BASE_DIR / ".env")
 
-CSV_FILE = Path(os.getenv("CSV_FILE", str(BASE_DIR / "plant_data.csv")))
+_truthy = lambda v: str(v).strip().lower() in {"1", "true", "yes", "on"}
+_sim_mode = _truthy(os.getenv("SIMULATION_MODE", "false"))
+_demo_mode = _truthy(os.getenv("DEMO_MODE", "false"))
+if _sim_mode:
+    _default_csv = "sim_data.csv"
+elif _demo_mode:
+    _default_csv = "demo_data.csv"
+else:
+    _default_csv = "plant_data.csv"
+CSV_FILE = Path(os.getenv("CSV_FILE", str(BASE_DIR / _default_csv)))
 MODEL_PATH = Path(os.getenv("FORECAST_MODEL_PATH", str(BASE_DIR / "models" / "soil_forecast_sarimax.joblib")))
 AUTH_CONFIG_PATH = BASE_DIR / "auth_config.yaml"
 FORECAST_MIN_ROWS = int(os.getenv("FORECAST_MIN_ROWS", "4"))

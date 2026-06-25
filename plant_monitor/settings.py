@@ -47,6 +47,11 @@ def save_data_enabled(env=None):
     return _truthy(source.get("SAVE_DATA_TO_CSV", "true"))
 
 
+def demo_mode_enabled(env=None):
+    source = os.environ if env is None else env
+    return _truthy(source.get("DEMO_MODE", "false"))
+
+
 def ml_control_mode(env=None):
     source = os.environ if env is None else env
     value = source.get("ML_CONTROL_MODE", "recommend").strip().lower()

@@ -1,10 +1,8 @@
 # Raspberry Pi 400 Smart Plant Monitoring and Watering System
 
-This project is a hardware-based IoT smart agriculture system. It reads soil moisture, temperature, and humidity, saves the readings into `plant_data.csv`, forecasts future soil moisture using SARIMAX, controls a water pump safely, shows a Streamlit dashboard, and can send Telegram/Favoriot updates.
+This project is a hardware-based IoT smart agriculture system. It reads soil moisture, temperature, and humidity, saves the readings into `plant_data.csv`, forecasts future soil moisture using SARIMAX, controls a water pump with a timed relay, shows a Streamlit dashboard with login, and can send Telegram/Favoriot updates.
 
 ## Main Objective
-
-The new ML objective is:
 
 ```text
 Forecast soil moisture for the next 4 hours, 6 hours, and 8 hours.
@@ -15,18 +13,18 @@ This is stronger than only predicting `Dry Soon / Not Dry Soon` because the dash
 ## System Flow
 
 ```text
-DHT11 + soil sensor
+DHT11 + soil sensor (10-sample smoothed average)
   -> Raspberry Pi 400 full_monitor.py
   -> preprocessing and feature extraction
   -> SARIMAX forecast for 4h / 6h / 8h
-  -> pump decision
+  -> pump decision (timed: 10s for DRY, 3s for forecast DRY)
   -> OLED display
-  -> plant_data.csv
-  -> Streamlit dashboard
+  -> plant_data.csv / sim_data.csv / demo_data.csv
+  -> Streamlit dashboard (login required)
   -> optional Telegram and Favoriot
 ```
 
-`full_monitor.py` reads sensors and controls hardware. `streamlit_app.py` does not read sensors directly; it reads `plant_data.csv`, so both programs work together.
+`full_monitor.py` reads sensors and controls hardware. `streamlit_app.py` does not read sensors directly; it reads the CSV file, so both programs work together.
 
 ## Hardware
 
@@ -46,7 +44,7 @@ DHT11 + soil sensor
 The system keeps a safe threshold backup:
 
 ```text
-soil_value < 30%  -> DRY -> pump ON
+soil_value < 30%  -> DRY -> pump ON for PUMP_DURATION_SECONDS (default 10s)
 30% to 70%        -> OPTIMAL
 soil_value > 70%  -> WET -> pump OFF
 ```
@@ -54,7 +52,8 @@ soil_value > 70%  -> WET -> pump OFF
 Forecast logic:
 
 ```text
-If any forecast value at 4h, 6h, or 8h is below 30%, forecast_risk = Dry Forecast.
+If 4h forecast value is below 30% -> forecast_risk = Dry Forecast
+-> pump ON for PUMP_FORECAST_DURATION_SECONDS (default 3s)
 ```
 
 Pump safety:
@@ -64,66 +63,60 @@ ML_CONTROL_MODE=recommend
 Forecast dry -> show warning only, pump stays OFF unless soil is already DRY.
 
 ML_CONTROL_MODE=control
-Forecast dry + soil is OPTIMAL -> pump may turn ON early.
+Forecast dry + soil is OPTIMAL -> pump may turn ON early (3 seconds).
 ```
 
 Default mode is `recommend` for safer demonstrations.
 
-## CSV Columns
+## Soil Sensor Smoothing
 
-`plant_data.csv` stores every reading:
+The soil sensor takes **10 samples every 50ms** and averages them instead of using a single raw reading. This removes electrical noise and gives a more stable moisture percentage.
 
-- `timestamp`
-- `temperature`
-- `humidity`
-- `soil_value`
-- `previous_soil_value`
-- `moisture_change_rate`
-- `vpd`
-- `soil_lag_1`
-- `soil_lag_2`
-- `soil_lag_3`
-- `soil_rolling_mean`
-- `soil_rate_per_hour`
-- `soil_status`
-- `pump_status`
-- `forecast_soil_4hr`
-- `forecast_soil_6hr`
-- `forecast_soil_8hr`
-- `forecast_risk`
-- `forecast_recommendation`
-- `ml_prediction`
-- `dry_soon_label`
-- `notification_status`
-- `debug_status`
+## Run Modes
 
-`ml_prediction` is kept for compatibility. It now shows `Forecast Dry`, `Forecast OK`, or `Unknown`.
+| Mode | Purpose | Data saved to | Dashboard reads |
+|---|---|---|---|
+| **Real hardware (normal)** | Production / data collection | `plant_data.csv` | `plant_data.csv` |
+| **Real hardware (demo)** | Manipulate sensors for presentation | `demo_data.csv` | `demo_data.csv` |
+| **Simulation** | Test without hardware | `sim_data.csv` | `sim_data.csv` |
 
-## Forecast Features
+`plant_data.csv` and `indoor_data.csv` are the only files used for SARIMAX training. Simulation and demo data never pollute the training dataset.
 
-SARIMAX uses real timestamped `plant_data.csv` readings. The code creates:
+### .env Settings Per Mode
 
-- lag features: `soil_lag_1`, `soil_lag_2`, `soil_lag_3`
-- recent rolling mean: `soil_rolling_mean`
-- drying speed: `soil_rate_per_hour`
-- vapour pressure deficit: `vpd`
-- future targets: `target_soil_4hr`, `target_soil_6hr`, `target_soil_8hr`
-
-Future temperature, humidity, and VPD are estimated using the recent average window:
-
+**Real hardware — normal data collection:**
 ```bash
-FORECAST_RECENT_AVERAGE_HOURS=1
+SIMULATION_MODE=false
+DEMO_MODE=false
+SAVE_DATA_TO_CSV=true
+READ_INTERVAL_SECONDS=600
 ```
 
-## Kaggle vs Real Data
-
-The Kaggle smart agriculture CSV can remain in the repo as starter/classification data and report evidence. For SARIMAX forecasting, the correct training source is real timestamped Raspberry Pi data:
-
-```text
-plant_data.csv
+**Real hardware — demo / presentation (fast, manipulate sensors freely):**
+```bash
+SIMULATION_MODE=false
+DEMO_MODE=true
+SAVE_DATA_TO_CSV=true
+READ_INTERVAL_SECONDS=5
+NOTIFICATION_COOLDOWN_SECONDS=10
+STREAMLIT_REFRESH_SECONDS=1
 ```
 
-Reason: SARIMAX is a time-series model. It needs readings in time order with timestamps.
+**Simulation — test without Raspberry Pi:**
+```bash
+SIMULATION_MODE=true
+DEMO_MODE=false
+SAVE_DATA_TO_CSV=true
+READ_INTERVAL_SECONDS=5
+SIM_SOIL_VALUE=20
+SIM_TEMPERATURE=32
+SIM_HUMIDITY=55
+```
+
+**Quick output check — no data saved at all:**
+```bash
+SAVE_DATA_TO_CSV=false
+```
 
 ## Setup
 
@@ -140,6 +133,14 @@ On Raspberry Pi, enable I2C and SPI:
 sudo raspi-config
 ```
 
+### Dashboard Login Setup
+
+```bash
+python generate_passwords.py
+```
+
+This creates `auth_config.yaml` with hashed passwords. Required before running Streamlit.
+
 ## Important `.env` Settings
 
 ```bash
@@ -150,10 +151,15 @@ READ_INTERVAL_SECONDS=600
 ML_CONTROL_MODE=recommend
 DEBUG_MODE=false
 SIMULATION_MODE=false
+DEMO_MODE=false
 RUN_ONCE=false
+SAVE_DATA_TO_CSV=true
 DRY_PERCENT=30
 WET_PERCENT=70
-CSV_FILE=plant_data.csv
+
+# Pump timer
+PUMP_DURATION_SECONDS=10
+PUMP_FORECAST_DURATION_SECONDS=3
 
 FORECAST_MODEL_PATH=models/soil_forecast_sarimax.joblib
 FORECAST_MIN_ROWS=24
@@ -166,16 +172,29 @@ STREAMLIT_REFRESH_SECONDS=10
 
 ## Run Commands
 
-Test one cycle without Raspberry Pi hardware:
-
-```bash
-SIMULATION_MODE=true RUN_ONCE=true python full_monitor.py
-```
-
-Run real hardware on Raspberry Pi:
+Real hardware on Raspberry Pi (normal):
 
 ```bash
 python full_monitor.py
+```
+
+Real hardware demo (manipulate sensors freely, data saved separately):
+
+```bash
+# Set DEMO_MODE=true in .env, then:
+python full_monitor.py
+```
+
+Simulation (no Raspberry Pi needed):
+
+```bash
+SIMULATION_MODE=true python full_monitor.py
+```
+
+Test one cycle only:
+
+```bash
+SIMULATION_MODE=true RUN_ONCE=true python full_monitor.py
 ```
 
 Run Streamlit dashboard in another terminal:
@@ -185,7 +204,7 @@ streamlit run streamlit_app.py --server.address 0.0.0.0
 ```
 
 > [!TIP]
-> **Live Demo Mode**: For presentations, you can set `READ_INTERVAL_SECONDS=2` and `STREAMLIT_REFRESH_SECONDS=2` in your `.env` file to force the system to update every 2 seconds. Because this aggressive refreshing makes it impossible to zoom in on charts, you can use the **⏸️ Pause Live Updates** checkbox in the sidebar to freeze the dashboard dynamically!
+> **Live Demo Mode**: Set `READ_INTERVAL_SECONDS=5` and `STREAMLIT_REFRESH_SECONDS=1` in your `.env` for fast updates. Use the **⏸️ Pause Live Updates** checkbox in the sidebar to freeze the dashboard so you can zoom in on charts.
 
 Open:
 
@@ -195,34 +214,33 @@ http://<raspberry-pi-ip-address>:8501
 
 ## Train SARIMAX Forecast Model
 
-After collecting enough real rows in `plant_data.csv`, run:
+After collecting enough real rows in `plant_data.csv` (minimum 24), run:
 
 ```bash
 python -m plant_monitor.train_forecast_model
 ```
 
-If there are not enough rows, the command prints `FORECAST_NOT_ENOUGH_DATA`. The monitor and dashboard will still run, but forecast values show as unavailable and pump control falls back to current soil threshold logic.
-
-## Demo Settings
-
-Normal collection:
+Training sources are set in `.env`:
 
 ```bash
-READ_INTERVAL_SECONDS=600
-NOTIFICATION_COOLDOWN_SECONDS=1800
-STREAMLIT_REFRESH_SECONDS=10
+TRAINING_CSV_FILES=plant_data.csv,indoor_data.csv
 ```
 
-Lecturer demo:
+If there are not enough rows, the command prints `FORECAST_NOT_ENOUGH_DATA`. The monitor and dashboard will still run, but forecast values show as unavailable.
 
-```bash
-READ_INTERVAL_SECONDS=10
-NOTIFICATION_COOLDOWN_SECONDS=60
-STREAMLIT_REFRESH_SECONDS=10
-ML_CONTROL_MODE=recommend
-```
+## CSV Columns
 
-After the demo, change `READ_INTERVAL_SECONDS` back to `600`.
+`plant_data.csv` stores every reading:
+
+- `timestamp`, `temperature`, `humidity`
+- `soil_value`, `previous_soil_value`, `moisture_change_rate`
+- `vpd`, `soil_lag_1`, `soil_lag_2`, `soil_lag_3`
+- `soil_rolling_mean`, `soil_rate_per_hour`
+- `soil_status`, `pump_status`
+- `forecast_soil_4hr`, `forecast_soil_6hr`, `forecast_soil_8hr`
+- `forecast_risk`, `forecast_recommendation`
+- `ml_prediction`, `dry_soon_label`
+- `notification_status`, `debug_status`
 
 ## Telegram Alerts
 
@@ -235,14 +253,7 @@ TELEGRAM_CHAT_ID=your_chat_or_group_id
 NOTIFICATION_COOLDOWN_SECONDS=1800
 ```
 
-Alert triggers:
-
-- `Forecast Dry`
-- `DRY`
-- `WET`
-- `DHT Missing`
-
-Telegram sends the same warning type only once per cooldown period.
+Alert triggers: `Forecast Dry`, `DRY`, `WET`, `DHT Missing`
 
 ## Tests
 

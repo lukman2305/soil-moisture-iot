@@ -37,6 +37,7 @@ from plant_monitor.notifications import detect_risk_events, send_telegram_alerts
 from plant_monitor.settings import (
     debug_mode_enabled,
     ml_control_mode,
+    demo_mode_enabled,
     pump_duration_seconds,
     pump_forecast_duration_seconds,
     read_interval_seconds,
@@ -50,9 +51,6 @@ from plant_monitor.settings import (
 BASE_DIR = Path(__file__).resolve().parent
 load_env_file(BASE_DIR / ".env")
 
-CSV_FILE = Path(os.getenv("CSV_FILE", str(BASE_DIR / "plant_data.csv")))
-# SQLite database for Grafana live dashboard (Option B)
-DB_FILE = Path(os.getenv("DB_FILE", str(BASE_DIR / "sensor_data.db")))
 RELAY_PIN = int(os.getenv("RELAY_PIN", "16"))
 SOIL_CHANNEL = int(os.getenv("SOIL_CHANNEL", "5"))
 DHT_PIN = os.getenv("DHT_PIN", "D4").upper()
@@ -60,8 +58,19 @@ READ_INTERVAL_SECONDS = read_interval_seconds()
 ML_CONTROL_MODE = ml_control_mode()
 DEBUG_MODE = debug_mode_enabled()
 SIMULATION_MODE = simulation_mode_enabled()
+DEMO_MODE = demo_mode_enabled()
 RUN_ONCE = run_once_enabled()
 SAVE_DATA = save_data_enabled()
+
+# Route CSV to a separate file during simulation or demo so plant_data.csv stays clean
+if SIMULATION_MODE:
+    _default_csv = "sim_data.csv"
+elif DEMO_MODE:
+    _default_csv = "demo_data.csv"
+else:
+    _default_csv = "plant_data.csv"
+CSV_FILE = Path(os.getenv("CSV_FILE", str(BASE_DIR / _default_csv)))
+DB_FILE = Path(os.getenv("DB_FILE", str(BASE_DIR / "sensor_data.db")))
 PUMP_DURATION_SECONDS = pump_duration_seconds()
 PUMP_FORECAST_DURATION_SECONDS = pump_forecast_duration_seconds()
 

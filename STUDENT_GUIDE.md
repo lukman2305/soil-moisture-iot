@@ -339,20 +339,97 @@ Cooldown example:
 
 For a group, add the bot to the group and use the group chat ID, usually starting with `-100`.
 
+## Pump Timer
+
+The pump does not run indefinitely. It runs for a fixed number of seconds then turns off automatically:
+
+| Trigger | Duration | Reason |
+|---|---|---|
+| Current soil DRY (`< 30%`) | `PUMP_DURATION_SECONDS` (default 10s) | Immediate watering |
+| 4h Forecast DRY | `PUMP_FORECAST_DURATION_SECONDS` (default 3s) | Preventive early watering |
+
+Report sentence:
+
+> The pump uses a timed relay to prevent over-watering. When triggered by current dry soil, the pump runs for 10 seconds. When triggered by a dry forecast, it runs for 3 seconds as a preventive measure.
+
+## Soil Sensor Smoothing
+
+Instead of reading one raw value from the soil sensor, the system reads **10 samples with 50ms delay** between each sample and takes the average. This is called an **averaging/smoothing filter** and reduces electrical noise.
+
+```python
+def read_soil_smoothed(soil_sensor, num_samples=10, delay=0.05):
+    samples = [soil_sensor.value for _ in range(num_samples)]
+    return sum(samples) / len(samples)
+```
+
+## Run Modes and Data Separation
+
+The system has three run modes. Each mode saves to a different CSV file so the real training data is never polluted:
+
+| Mode | `.env` setting | Saves to | Dashboard reads |
+|---|---|---|---|
+| Real hardware (normal) | `SIMULATION_MODE=false`, `DEMO_MODE=false` | `plant_data.csv` | `plant_data.csv` |
+| Real hardware (demo) | `DEMO_MODE=true` | `demo_data.csv` | `demo_data.csv` |
+| Simulation | `SIMULATION_MODE=true` | `sim_data.csv` | `sim_data.csv` |
+
+Only `plant_data.csv` and `indoor_data.csv` are used for SARIMAX training.
+
+### What to Set in `.env` Per Mode
+
+**Normal data collection (Raspberry Pi running 24/7):**
+```bash
+SIMULATION_MODE=false
+DEMO_MODE=false
+SAVE_DATA_TO_CSV=true
+READ_INTERVAL_SECONDS=600
+```
+
+**Real hardware demo (manipulate sensors freely during presentation):**
+```bash
+SIMULATION_MODE=false
+DEMO_MODE=true
+SAVE_DATA_TO_CSV=true
+READ_INTERVAL_SECONDS=5
+NOTIFICATION_COOLDOWN_SECONDS=10
+STREAMLIT_REFRESH_SECONDS=1
+```
+
+**Simulation (no Raspberry Pi, test on laptop):**
+```bash
+SIMULATION_MODE=true
+DEMO_MODE=false
+SAVE_DATA_TO_CSV=true
+READ_INTERVAL_SECONDS=5
+SIM_SOIL_VALUE=20
+```
+
+**Quick output check only (nothing saved):**
+```bash
+SAVE_DATA_TO_CSV=false
+```
+
+## Dashboard Login
+
+The Streamlit dashboard requires a username and password. Run this once to create credentials:
+
+```bash
+python generate_passwords.py
+```
+
+This creates `auth_config.yaml`. Share this file manually with teammates — it is not uploaded to GitHub for security.
+
 ## Demo Commands
+
+Real hardware demo (set `DEMO_MODE=true` in `.env` first):
+
+```bash
+python full_monitor.py
+```
 
 Simulation:
 
 ```bash
-cd ~/anaconda_projects/iot/project/soil-moisture-iot
-source ~/venvs/ml_env/bin/activate
-SIMULATION_MODE=true RUN_ONCE=true python full_monitor.py
-```
-
-Real Raspberry Pi:
-
-```bash
-python full_monitor.py
+SIMULATION_MODE=true python full_monitor.py
 ```
 
 Streamlit:
@@ -367,31 +444,13 @@ Train forecast model after enough rows:
 python -m plant_monitor.train_forecast_model
 ```
 
-## Demo Settings
-
-Normal:
-
-```bash
-READ_INTERVAL_SECONDS=600
-NOTIFICATION_COOLDOWN_SECONDS=1800
-```
-
-Lecturer demo:
-
-```bash
-READ_INTERVAL_SECONDS=10
-NOTIFICATION_COOLDOWN_SECONDS=60
-STREAMLIT_REFRESH_SECONDS=10
-ML_CONTROL_MODE=recommend
-```
-
 ## Student 4: Data Processing and Intelligence
 
 Student 4 requirements:
 
 | Requirement | How the code fulfills it |
 |---|---|
-| Preprocessing | Converts raw soil sensor data to percentage |
+| Preprocessing | Converts raw soil sensor data to percentage using 10-sample averaging filter |
 | Filtering | Handles missing DHT and drops incomplete training rows |
 | Feature extraction | VPD, lags, rolling mean, rate per hour |
 | Intelligent logic | SARIMAX forecasts 4h/6h/8h soil moisture |
@@ -399,7 +458,7 @@ Student 4 requirements:
 
 Report paragraph:
 
-> Student 4 handled the data processing and intelligence component. The system converts raw soil readings into moisture percentage, classifies soil condition using thresholds, and extracts forecasting features such as VPD, lag values, rolling mean, and soil moisture rate of change per hour. A threshold-based baseline is used for current soil control, while SARIMAX provides intelligent forecasting for future soil moisture at 4h, 6h, and 8h.
+> Student 4 handled the data processing and intelligence component. The system converts raw soil readings into moisture percentage using a 10-sample averaging filter to reduce noise, classifies soil condition using thresholds, and extracts forecasting features such as VPD, lag values, rolling mean, and soil moisture rate of change per hour. A threshold-based baseline is used for current soil control, while SARIMAX provides intelligent forecasting for future soil moisture at 4h, 6h, and 8h.
 
 ## Student 5: Dashboard, Visualization, and Connectivity
 
@@ -407,7 +466,7 @@ Student 5 requirements:
 
 | Requirement | How the code fulfills it |
 |---|---|
-| Dashboard | Streamlit main dashboard |
+| Dashboard | Streamlit main dashboard with login authentication |
 | Visualization | Soil, temperature, humidity, trend, and forecast charts |
 | Monitoring | Recent CSV table and Debug/System Status tab |
 | Alerts | Streamlit banners and Telegram alerts |
@@ -415,8 +474,9 @@ Student 5 requirements:
 
 Report paragraph:
 
-> Student 5 handled dashboard, visualization, and connectivity. Streamlit is used as the main dashboard to display current readings, 4h/6h/8h soil forecasts, pump status, alert banners, charts, recent CSV data, and debug information. Telegram notifications send alerts for forecast dryness, dry soil, wet soil, and DHT sensor failure. Favoriot remains optional for cloud visualization and IoT platform integration.
+> Student 5 handled dashboard, visualization, and connectivity. Streamlit is used as the main dashboard with login authentication to display current readings, 4h/6h/8h soil forecasts, pump status, alert banners, charts, recent CSV data, and debug information. Telegram notifications send alerts for forecast dryness, dry soil, wet soil, and DHT sensor failure. Favoriot remains optional for cloud visualization and IoT platform integration.
 
 ## Short Presentation Script
 
-> This project is a Raspberry Pi 400 smart irrigation system. It reads temperature and humidity using DHT11 and soil moisture using an analog soil sensor through MCP3008. The system logs readings into CSV and displays them in a Streamlit dashboard. The baseline logic turns the pump ON when current soil moisture is below 30%. The intelligent part uses SARIMAX to forecast soil moisture after 4, 6, and 8 hours using lag features, rolling average, drying rate, temperature, humidity, and VPD. If future soil moisture is predicted to fall below 30%, the system shows a forecast warning and can send a Telegram alert.
+> This project is a Raspberry Pi 400 smart irrigation system. It reads temperature and humidity using DHT11 and soil moisture using an analog soil sensor through MCP3008, averaging 10 samples per reading for stability. The system logs readings into CSV and displays them in a Streamlit dashboard protected by a login screen. The baseline logic turns the pump ON for 10 seconds when current soil moisture is below 30%. The intelligent part uses SARIMAX to forecast soil moisture after 4, 6, and 8 hours using lag features, rolling average, drying rate, temperature, humidity, and VPD. If future soil moisture is predicted to fall below 30%, the system activates the pump for 3 seconds as a preventive measure and sends a Telegram alert.
+
