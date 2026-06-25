@@ -41,6 +41,7 @@ from plant_monitor.settings import (
     pump_forecast_duration_seconds,
     read_interval_seconds,
     run_once_enabled,
+    save_data_enabled,
     simulation_mode_enabled,
     telegram_config_from_env,
 )
@@ -60,6 +61,7 @@ ML_CONTROL_MODE = ml_control_mode()
 DEBUG_MODE = debug_mode_enabled()
 SIMULATION_MODE = simulation_mode_enabled()
 RUN_ONCE = run_once_enabled()
+SAVE_DATA = save_data_enabled()
 PUMP_DURATION_SECONDS = pump_duration_seconds()
 PUMP_FORECAST_DURATION_SECONDS = pump_forecast_duration_seconds()
 
@@ -326,10 +328,12 @@ def run_cycle(gpio, dht, soil_sensor, oled, image, draw, font, model_bundle, fav
         run_timed_pump(gpio, reading)
     log_pump_reason(reading)
 
-    write_csv_reading(CSV_FILE, reading)
-    log_event("CSV_WRITE_OK", f"saved row to {CSV_FILE}", DEBUG_MODE)
-    write_db_reading(DB_FILE, reading)
-    log_event("DB_WRITE_OK", f"saved row to {DB_FILE}", DEBUG_MODE)
+    if SAVE_DATA:
+        write_csv_reading(CSV_FILE, reading)
+        log_event("CSV_WRITE_OK", f"saved row to {CSV_FILE}", DEBUG_MODE)
+        write_db_reading(DB_FILE, reading)
+        log_event("DB_WRITE_OK", f"saved row to {DB_FILE}", DEBUG_MODE)
+        
     send_to_favoriot(favoriot_config, reading, logger=lambda message: log_event("FAVORIOT", message, DEBUG_MODE))
     show_oled(oled, image, draw, font, reading)
 

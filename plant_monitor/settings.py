@@ -42,6 +42,11 @@ def run_once_enabled(env=None):
     return _truthy(source.get("RUN_ONCE", "false"))
 
 
+def save_data_enabled(env=None):
+    source = os.environ if env is None else env
+    return _truthy(source.get("SAVE_DATA_TO_CSV", "true"))
+
+
 def ml_control_mode(env=None):
     source = os.environ if env is None else env
     value = source.get("ML_CONTROL_MODE", "recommend").strip().lower()
