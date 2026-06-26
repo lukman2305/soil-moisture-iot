@@ -60,12 +60,28 @@ def decide_pump_status_with_ml(soil_status, ml_prediction, control_mode="recomme
     return "OFF"
 
 
-def decide_pump_status_with_forecast(soil_status, forecast_risk, control_mode="recommend"):
+def decide_pump_status_with_forecast(
+    soil_status, forecast_risk, control_mode="recommend", forecast_soil_4hr=None, dry_threshold=30.0
+):
+    """Decide pump status based on current soil and AI forecast.
+
+    Pump logic (per horizon):
+    - Current soil DRY              -> pump ON always (emergency)
+    - Current soil WET              -> pump OFF always (prevent flooding)
+    - 4h forecast DRY + control     -> pump ON early (proactive)
+    - 6h/8h forecast DRY only       -> alert only, pump stays OFF
+    - Any other case                -> pump OFF
+    """
     if soil_status == "DRY":
         return "ON"
     if soil_status == "WET":
         return "OFF"
-    if control_mode == "control" and soil_status == "OPTIMAL" and forecast_risk == "Dry Forecast":
+    if (
+        control_mode == "control"
+        and soil_status == "OPTIMAL"
+        and forecast_soil_4hr is not None
+        and forecast_soil_4hr < float(dry_threshold)
+    ):
         return "ON"
     return "OFF"
 

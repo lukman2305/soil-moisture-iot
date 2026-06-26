@@ -202,7 +202,13 @@ def build_reading_from_values(
         dry_threshold=DRY_PERCENT,
         wet_threshold=WET_PERCENT,
     )
-    pump_status = decide_pump_status_with_forecast(soil_status, forecast_result.forecast_risk, control_mode)
+    pump_status = decide_pump_status_with_forecast(
+        soil_status,
+        forecast_result.forecast_risk,
+        control_mode,
+        forecast_soil_4hr=forecast_result.forecast_soil_4hr,
+        dry_threshold=DRY_PERCENT,
+    )
 
     return SensorReading(
         timestamp=timestamp,
