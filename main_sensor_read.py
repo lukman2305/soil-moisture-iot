@@ -44,10 +44,10 @@ soil = MCP3008(channel=TARGET_CHANNEL)
 # ==========================
 # Forecast Model Setup
 # ==========================
-MODEL_PATH = "/home/pi/soil-moisture-iot2/models/soil_forecast_sarimax.joblib"
+MODEL_PATH = "models/soil_forecast_sarimax.joblib"
 DRY_THRESHOLD = 30.0
 FORECAST_HORIZONS = [4, 6, 8]   # hours
-MIN_HISTORY_ROWS = 4             # minimum readings before forecasting
+MIN_HISTORY_ROWS = 12             # minimum readings before forecasting
 
 history = []   # stores past readings for the model
 
