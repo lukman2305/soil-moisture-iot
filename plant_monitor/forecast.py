@@ -270,8 +270,8 @@ def train_forecast_model_from_frame(frame, min_rows=24, horizons_hours=None):
                 model = SARIMAX(
                     endog,
                     exog=exog,
-                    order=(1, 0, 0),
-                    trend="c",
+                    order=(1, 1, 0),
+                    trend="n",
                     enforce_stationarity=False,
                     enforce_invertibility=False,
                 ).fit(disp=False)
@@ -279,7 +279,7 @@ def train_forecast_model_from_frame(frame, min_rows=24, horizons_hours=None):
             else:
                 model = SARIMAX(
                     endog,
-                    order=(1, 0, 0),
+                    order=(1, 1, 0),
                     trend="n",
                     enforce_stationarity=False,
                     enforce_invertibility=False,

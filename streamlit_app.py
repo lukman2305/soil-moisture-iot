@@ -142,7 +142,7 @@ def load_data(csv_path):
 
     frame = pd.read_csv(path)
     if "timestamp" in frame.columns:
-        frame["timestamp"] = pd.to_datetime(frame["timestamp"], errors="coerce")
+        frame["timestamp"] = pd.to_datetime(frame["timestamp"], format="mixed", errors="coerce")
         frame = frame.dropna(subset=["timestamp"]).reset_index(drop=True)
     for column in NUMERIC_COLUMNS:
         if column in frame.columns:

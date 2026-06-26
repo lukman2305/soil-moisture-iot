@@ -86,15 +86,29 @@ DRY_PERCENT = float(os.getenv("DRY_PERCENT", "30"))
 WET_PERCENT = float(os.getenv("WET_PERCENT", "70"))
 FORECAST_DRY_PERCENT = float(os.getenv("FORECAST_DRY_PERCENT", str(DRY_PERCENT)))
 
-
+_sim_soil = None
 
 def simulated_sensor_values(env=None):
+    global _sim_soil
+    import random, math
     source = os.environ if env is None else env
-    return (
-        float(source.get("SIM_TEMPERATURE", "32")),
-        float(source.get("SIM_HUMIDITY", "55")),
-        float(source.get("SIM_SOIL_VALUE", "45")),
-    )
+    
+    if _sim_soil is None:
+        _sim_soil = float(source.get("SIM_SOIL_VALUE", "45"))
+    else:
+        # Decays ~0.3% per cycle to show a nice downward trend for the forecast
+        _sim_soil -= random.uniform(0.1, 0.4)
+        _sim_soil = max(10.0, _sim_soil)
+        
+    base_t = float(source.get("SIM_TEMPERATURE", "32"))
+    base_h = float(source.get("SIM_HUMIDITY", "55"))
+    
+    # Add a slight sine wave and random noise to temp/humidity to make it look alive
+    wave = math.sin(time.time() / 100.0)
+    temp = base_t + wave * 1.5 + random.uniform(-0.2, 0.2)
+    hum = base_h - wave * 4.0 + random.uniform(-1.0, 1.0)
+    
+    return round(temp, 1), round(hum, 1), round(_sim_soil, 2)
 
 
 def board_pin(pin_name):
@@ -334,6 +348,12 @@ def run_cycle(gpio, dht, soil_sensor, oled, image, draw, font, model_bundle, fav
 
     if gpio:
         run_timed_pump(gpio, reading)
+    elif SIMULATION_MODE and reading.pump_status == "ON":
+        global _sim_soil
+        if _sim_soil is not None:
+            _sim_soil = min(WET_PERCENT + 10.0, _sim_soil + 35.0)
+            print(f"Simulation Pump ON: Soil moisture instantly jumped to {_sim_soil}%")
+            
     log_pump_reason(reading)
 
     if SAVE_DATA:
@@ -364,6 +384,13 @@ def run_cycle(gpio, dht, soil_sensor, oled, image, draw, font, model_bundle, fav
 
 
 def main():
+    if SIMULATION_MODE or DEMO_MODE:
+        import shutil
+        plant_csv = BASE_DIR / "plant_data.csv"
+        if plant_csv.exists():
+            print(f"Copying historical data from {plant_csv.name} to {CSV_FILE.name} for testing...")
+            shutil.copy2(plant_csv, CSV_FILE)
+
     ensure_csv_header(CSV_FILE)
     init_db(DB_FILE)  # create sensor_data.db if it doesn't exist
     favoriot_config = load_favoriot_config()
