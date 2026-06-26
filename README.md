@@ -16,7 +16,7 @@ This is stronger than only predicting `Dry Soon / Not Dry Soon` because the dash
 DHT11 + soil sensor (10-sample smoothed average)
   -> Raspberry Pi 400 full_monitor.py
   -> preprocessing and feature extraction
-  -> SARIMAX forecast for 4h / 6h / 8h
+  -> ARIMA(1,1,0) forecast for 4h / 6h / 8h (tracks rates of change)
   -> pump decision (timed: 10s for DRY, 3s for forecast DRY)
   -> OLED display
   -> plant_data.csv / sim_data.csv / demo_data.csv
@@ -78,9 +78,16 @@ The soil sensor takes **10 samples every 50ms** and averages them instead of usi
 |---|---|---|---|
 | **Real hardware (normal)** | Production / data collection | `plant_data.csv` | `plant_data.csv` |
 | **Real hardware (demo)** | Manipulate sensors for presentation | `demo_data.csv` | `demo_data.csv` |
-| **Simulation** | Test without hardware | `sim_data.csv` | `sim_data.csv` |
+| **Simulation** | Test without hardware (Dynamic environment simulation) | `sim_data.csv` | `sim_data.csv` |
 
-`plant_data.csv` and `indoor_data.csv` are the only files used for SARIMAX training. Simulation and demo data never pollute the training dataset.
+`plant_data.csv` and `indoor_data.csv` are the only files used for SARIMAX training. Simulation and demo data never pollute the training dataset. When starting Simulation mode, the historical data is automatically cloned to `sim_data.csv` so the dashboard charts are instantly populated.
+
+### Simulation Mode Dynamics
+The system uses an advanced dynamic simulation engine to mimic a real environment:
+- **Environment:** Temperature and humidity fluctuate on a natural sine-wave curve with simulated sensor noise.
+- **Soil Drying:** Soil moisture decays slightly every cycle to simulate a drying plant.
+- **Virtual Watering:** When soil drops below the `DRY_PERCENT` threshold, the virtual pump kicks on and instantly spikes moisture back to 80% to mimic a watering event.
+
 
 ### .env Settings Per Mode
 
