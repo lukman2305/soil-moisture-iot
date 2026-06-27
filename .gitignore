@@ -9,3 +9,4 @@ data/*.csv
 # Security — never commit passwords or sensor DB
 auth_config.yaml
 sensor_data.db
+.env

@@ -368,6 +368,15 @@ def run_cycle(gpio, dht, soil_sensor, oled, image, draw, font, model_bundle, fav
         write_db_reading(DB_FILE, reading)
         log_event("DB_WRITE_OK", f"saved row to {DB_FILE}", DEBUG_MODE)
         
+        # --- NEW CODE: Export JSON for static dashboard ---
+        import pandas as pd
+        json_file = BASE_DIR / "outputs" / "plant_data.json"
+        json_file.parent.mkdir(exist_ok=True)
+        df = pd.read_csv(CSV_FILE)
+        df.to_json(json_file, orient="records")
+        log_event("JSON_WRITE_OK", f"saved json to {json_file}", DEBUG_MODE)
+        # --------------------------------------------------
+
     send_to_favoriot(favoriot_config, reading, logger=lambda message: log_event("FAVORIOT", message, DEBUG_MODE))
     show_oled(oled, image, draw, font, reading)
 

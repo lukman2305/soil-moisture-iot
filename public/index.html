@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Plant Monitor</title>
+    
+    <!-- Google Fonts for Modern Typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Plotly.js for Charts -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="logo-icon">🌿</div>
+                <h2>Plant Monitor</h2>
+            </div>
+            
+            <nav class="nav-menu">
+                <button class="nav-item active" data-tab="dashboard">
+                    <span class="icon">📊</span> Dashboard
+                </button>
+                <button class="nav-item" data-tab="history">
+                    <span class="icon">📈</span> Data Trends
+                </button>
+                <button class="nav-item" data-tab="settings">
+                    <span class="icon">⚙️</span> Settings
+                </button>
+            </nav>
+            
+            <div class="system-status">
+                <div class="status-indicator"></div>
+                <span>System Online</span>
+                <div class="update-time" id="last-update">Updating...</div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="header-titles">
+                    <h1>Soil Health Overview</h1>
+                    <p>Live ML predictions & sensor telemetry</p>
+                </div>
+                
+                <div class="controls">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="auto-refresh" checked>
+                        <span class="slider"></span>
+                        <span class="label-text">Auto Refresh</span>
+                    </label>
+                </div>
+            </header>
+
+            <div id="alerts-container">
+                <!-- Alerts injected here by app.js -->
+            </div>
+
+            <!-- Tab: Dashboard -->
+            <section id="tab-dashboard" class="tab-content active">
+                <div class="metrics-grid">
+                    <!-- Soil Moisture Card -->
+                    <div class="metric-card glass">
+                        <div class="card-header">
+                            <h3>Current Soil Moisture</h3>
+                            <span class="icon drop">💧</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="value" id="current-soil">--%</div>
+                            <div class="status-badge" id="current-soil-status">Loading</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 4H Forecast Card -->
+                    <div class="metric-card glass">
+                        <div class="card-header">
+                            <h3>4H Forecast</h3>
+                            <span class="icon clock">⏳</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="value" id="forecast-4h">--%</div>
+                            <div class="status-badge" id="forecast-4h-status">Loading</div>
+                        </div>
+                    </div>
+
+                    <!-- Pump Status Card -->
+                    <div class="metric-card glass">
+                        <div class="card-header">
+                            <h3>Irrigation Pump</h3>
+                            <span class="icon pump">⚙️</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="value" id="pump-status">--</div>
+                            <div class="trend" id="forecast-risk">Evaluating...</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Environment Card -->
+                    <div class="metric-card glass">
+                        <div class="card-header">
+                            <h3>Environment</h3>
+                            <span class="icon thermo">🌡️</span>
+                        </div>
+                        <div class="card-body env-metrics">
+                            <div class="sub-metric">
+                                <span class="label">Temp</span>
+                                <span class="val" id="current-temp">--°C</span>
+                            </div>
+                            <div class="divider"></div>
+                            <div class="sub-metric">
+                                <span class="label">Hum</span>
+                                <span class="val" id="current-humidity">--%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-section glass">
+                    <div class="chart-header">
+                        <h2>Prediction Horizon</h2>
+                        <p>Current vs SARIMAX Model Forecast (4h, 6h, 8h)</p>
+                    </div>
+                    <div id="forecast-chart" class="plotly-container"></div>
+                </div>
+            </section>
+
+            <!-- Tab: History -->
+            <section id="tab-history" class="tab-content">
+                <div class="chart-section glass">
+                    <h2>Historical Soil Moisture Trend</h2>
+                    <div id="history-soil-chart" class="plotly-container"></div>
+                </div>
+                
+                <div class="chart-grid">
+                    <div class="chart-section glass">
+                        <h2>Temperature</h2>
+                        <div id="history-temp-chart" class="plotly-container"></div>
+                    </div>
+                    <div class="chart-section glass">
+                        <h2>Humidity</h2>
+                        <div id="history-hum-chart" class="plotly-container"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab: Settings/Debug -->
+            <section id="tab-settings" class="tab-content">
+                <div class="glass" style="padding: 2rem; margin-bottom: 2rem;">
+                    <div style="margin-bottom: 2rem;">
+                        <h2 style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem;">System Configuration</h2>
+                        <p style="color: var(--text-secondary);">Adjust dashboard visualization settings here.</p>
+                    </div>
+                    
+                    <div class="settings-form" style="max-width: 600px;">
+                        <div class="form-group" style="margin-bottom: 1.5rem;">
+                            <label style="display: block; margin-bottom: 0.75rem; font-weight: 500; font-size: 0.95rem;">Refresh Interval (seconds)</label>
+                            <input type="number" id="refresh-interval" value="2" min="1" max="60" style="width: 100%; padding: 0.875rem 1rem; border-radius: 10px; border: 1px solid var(--glass-border); background: rgba(0, 0, 0, 0.05); color: var(--text-primary); font-family: inherit; font-size: 1rem; transition: all 0.2s;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 2rem;">
+                            <label style="display: block; margin-bottom: 0.75rem; font-weight: 500; font-size: 0.95rem;">Data Source (JSON File Path)</label>
+                            <input type="text" id="csv-file-name" value="../outputs/plant_data.json" style="width: 100%; padding: 0.875rem 1rem; border-radius: 10px; border: 1px solid var(--glass-border); background: rgba(0, 0, 0, 0.05); color: var(--text-primary); font-family: inherit; font-size: 1rem; transition: all 0.2s;">
+                        </div>
+                        <button id="apply-settings" class="btn-primary" style="padding: 0.875rem 2rem; border-radius: 10px; border: none; background: linear-gradient(135deg, var(--accent-color), var(--accent-hover)); color: white; font-weight: 600; font-size: 1rem; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);">Apply Settings</button>
+                    </div>
+                </div>
+                
+                <div class="glass" style="padding: 2rem;">
+                    <div style="margin-bottom: 1.5rem;">
+                        <h2 style="font-size: 1.25rem; font-weight: 600;">Raw Data Inspector (Last Row)</h2>
+                    </div>
+                    <pre id="debug-json" class="debug-panel" style="background: rgba(0, 0, 0, 0.4); padding: 1.5rem; border-radius: 12px; overflow-x: auto; color: #10b981; font-family: 'Courier New', Courier, monospace; font-size: 0.9rem; border: 1px solid var(--glass-border); box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);">Waiting for data...</pre>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Custom Logic -->
+    <script src="app.js"></script>
+</body>
+</html>
