@@ -1323,3 +1323,5 @@ timestamp,temperature,humidity,soil_value,previous_soil_value,moisture_change_ra
 2026-06-27 19:34:44,32.4,48,52.8,46.8,6.0,2.5,46.8,47.2,47.4,48.9,0.0,OPTIMAL,OFF,52.7,52.7,52.7,OK,Forecast OK. No early watering needed.,Forecast OK,,NONE;NO_RISK,OK
 2026-06-27 19:34:50,32.7,48,51.7,46.8,4.9,2.6,46.8,47.2,47.4,48.6,0.0,OPTIMAL,OFF,51.8,51.8,51.8,OK,Forecast OK. No early watering needed.,Forecast OK,,NONE;NO_RISK,OK
 2026-06-27 19:35:38,32.7,49,0.0,46.8,-46.8,2.5,46.8,47.2,47.4,31.3,-0.2,DRY,ON,0.4,0.4,0.4,Dry Forecast,Forecast dry. Recommend watering soon; pump stays OFF because ML_CONTROL_MODE=recommend.,Forecast Dry,,"Forecast Dry,DRY;TELEGRAM_SENT:Forecast Dry,DRY",OK
+2026-06-27 23:27:05,29.3,74,0.0,46.8,-46.8,1.1,46.8,47.2,47.4,31.3,-0.2,DRY,ON,0.4,0.4,0.4,Dry Forecast,Forecast dry. Pump may turn ON early because ML_CONTROL_MODE=control.,Forecast Dry,,"Forecast Dry,DRY;TELEGRAM_SENT:Forecast Dry,DRY",OK
+2026-06-27 23:28:44,29.9,70,0.0,46.8,-46.8,1.3,46.8,47.2,47.4,31.3,-0.2,DRY,ON,0.4,0.4,0.4,Dry Forecast,Forecast dry. Pump may turn ON early because ML_CONTROL_MODE=control.,Forecast Dry,,"Forecast Dry,DRY;TELEGRAM_SENT:Forecast Dry,DRY",OK
