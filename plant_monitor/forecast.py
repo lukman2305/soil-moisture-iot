@@ -120,7 +120,7 @@ def enrich_forecast_features(frame, rolling_window=3):
         enriched["soil_value"].rolling(window=rolling_window, min_periods=1).mean().round(1)
     )
     elapsed_hours = enriched["timestamp"].diff().dt.total_seconds() / 3600.0
-    elapsed_hours = elapsed_hours.replace(0, pd.NA)
+    elapsed_hours = elapsed_hours.replace(0, float('nan'))
     enriched["soil_rate_per_hour"] = (enriched["soil_value"].diff() / elapsed_hours).fillna(0.0).round(3)
     return enriched
 
@@ -270,8 +270,8 @@ def train_forecast_model_from_frame(frame, min_rows=24, horizons_hours=None):
                 model = SARIMAX(
                     endog,
                     exog=exog,
-                    order=(1, 0, 0),
-                    trend="c",
+                    order=(1, 1, 0),
+                    trend="n",
                     enforce_stationarity=False,
                     enforce_invertibility=False,
                 ).fit(disp=False)
@@ -279,7 +279,7 @@ def train_forecast_model_from_frame(frame, min_rows=24, horizons_hours=None):
             else:
                 model = SARIMAX(
                     endog,
-                    order=(1, 0, 0),
+                    order=(1, 1, 0),
                     trend="n",
                     enforce_stationarity=False,
                     enforce_invertibility=False,
@@ -308,11 +308,21 @@ def load_forecast_model(model_path):
     path = Path(model_path)
     if not path.exists():
         return ForecastBundle(status_code=FORECAST_MODEL_MISSING)
-    bundle = joblib.load(path)
+    try:
+        bundle = joblib.load(path)
+    except Exception:
+        # Model was saved with a different pandas/statsmodels version.
+        # Delete the stale file so it gets retrained automatically next run.
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return ForecastBundle(status_code=FORECAST_MODEL_MISSING)
     if isinstance(bundle, ForecastBundle):
         bundle.status_code = FORECAST_MODEL_LOADED
         return bundle
     return ForecastBundle(model=bundle, status_code=FORECAST_MODEL_LOADED)
+
 
 
 def load_or_train_forecast_model(model_path, training_csv_path, min_rows=24, horizons_hours=None):

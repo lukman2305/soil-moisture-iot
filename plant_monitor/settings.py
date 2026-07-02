@@ -4,11 +4,23 @@ from plant_monitor.notifications import TelegramConfig
 
 
 DEFAULT_READ_INTERVAL_SECONDS = 600
+DEFAULT_PUMP_DURATION_SECONDS = 10
+DEFAULT_PUMP_FORECAST_DURATION_SECONDS = 5
 
 
 def read_interval_seconds(env=None):
     source = os.environ if env is None else env
     return float(source.get("READ_INTERVAL_SECONDS", DEFAULT_READ_INTERVAL_SECONDS))
+
+
+def pump_duration_seconds(env=None):
+    source = os.environ if env is None else env
+    return float(source.get("PUMP_DURATION_SECONDS", DEFAULT_PUMP_DURATION_SECONDS))
+
+
+def pump_forecast_duration_seconds(env=None):
+    source = os.environ if env is None else env
+    return float(source.get("PUMP_FORECAST_DURATION_SECONDS", DEFAULT_PUMP_FORECAST_DURATION_SECONDS))
 
 
 def _truthy(value):
@@ -28,6 +40,16 @@ def simulation_mode_enabled(env=None):
 def run_once_enabled(env=None):
     source = os.environ if env is None else env
     return _truthy(source.get("RUN_ONCE", "false"))
+
+
+def save_data_enabled(env=None):
+    source = os.environ if env is None else env
+    return _truthy(source.get("SAVE_DATA_TO_CSV", "true"))
+
+
+def demo_mode_enabled(env=None):
+    source = os.environ if env is None else env
+    return _truthy(source.get("DEMO_MODE", "false"))
 
 
 def ml_control_mode(env=None):

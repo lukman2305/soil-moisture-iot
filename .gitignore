@@ -7,3 +7,12 @@ sensor_readings.csv
 .telegram_state.json
 models/*.joblib
 data/*.csv
+# Local environment files
+testing/
+*.pyc
+# Runtime/cache files
+sim_data.csv
+*.log
+# OS/editor files
+.DS_Store
+.vscode/

@@ -4,6 +4,8 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
+from plant_monitor.db import init_db, write_db_reading
+
 from plant_monitor.app import (
     SensorReading,
     ensure_csv_header,
@@ -35,8 +37,12 @@ from plant_monitor.notifications import detect_risk_events, send_telegram_alerts
 from plant_monitor.settings import (
     debug_mode_enabled,
     ml_control_mode,
+    demo_mode_enabled,
+    pump_duration_seconds,
+    pump_forecast_duration_seconds,
     read_interval_seconds,
     run_once_enabled,
+    save_data_enabled,
     simulation_mode_enabled,
     telegram_config_from_env,
 )
@@ -45,19 +51,27 @@ from plant_monitor.settings import (
 BASE_DIR = Path(__file__).resolve().parent
 load_env_file(BASE_DIR / ".env")
 
-CSV_FILE = Path(os.getenv("CSV_FILE", str(BASE_DIR / "plant_data.csv")))
 RELAY_PIN = int(os.getenv("RELAY_PIN", "16"))
-SOIL_CHANNEL = int(os.getenv("SOIL_CHANNEL", "0"))
+SOIL_CHANNEL = int(os.getenv("SOIL_CHANNEL", "5"))
 DHT_PIN = os.getenv("DHT_PIN", "D4").upper()
 READ_INTERVAL_SECONDS = read_interval_seconds()
 ML_CONTROL_MODE = ml_control_mode()
 DEBUG_MODE = debug_mode_enabled()
 SIMULATION_MODE = simulation_mode_enabled()
+DEMO_MODE = demo_mode_enabled()
 RUN_ONCE = run_once_enabled()
+SAVE_DATA = save_data_enabled()
 
-PUMP_SELF_TEST = os.getenv("PUMP_SELF_TEST", "false").lower() == "true"
-PUMP_SELF_TEST_ON_SECONDS = float(os.getenv("PUMP_SELF_TEST_ON_SECONDS", "5"))
-PUMP_SELF_TEST_OFF_SECONDS = float(os.getenv("PUMP_SELF_TEST_OFF_SECONDS", "2"))
+# Route CSV to a separate file during simulation or demo so plant_data.csv stays clean
+if SIMULATION_MODE:
+    CSV_FILE = BASE_DIR / "sim_data.csv"
+elif DEMO_MODE:
+    CSV_FILE = BASE_DIR / "demo_data.csv"
+else:
+    CSV_FILE = Path(os.getenv("CSV_FILE", str(BASE_DIR / "plant_data.csv")))
+DB_FILE = Path(os.getenv("DB_FILE", str(BASE_DIR / "sensor_data.db")))
+PUMP_DURATION_SECONDS = pump_duration_seconds()
+PUMP_FORECAST_DURATION_SECONDS = pump_forecast_duration_seconds()
 
 FORECAST_MODEL_PATH = Path(os.getenv("FORECAST_MODEL_PATH", str(BASE_DIR / "models" / "soil_forecast_sarimax.joblib")))
 FORECAST_MIN_ROWS = int(os.getenv("FORECAST_MIN_ROWS", "24"))
@@ -67,19 +81,34 @@ TELEGRAM_STATE_FILE = Path(os.getenv("TELEGRAM_STATE_FILE", str(BASE_DIR / ".tel
 
 # For most analog soil sensors: raw MCP3008 value is high when dry and low when wet.
 SOIL_DRY_RAW = float(os.getenv("SOIL_DRY_RAW", "1.0"))
-SOIL_WET_RAW = float(os.getenv("SOIL_WET_RAW", "0.0"))
+SOIL_WET_RAW = float(os.getenv("SOIL_WET_RAW", "0.51"))
 DRY_PERCENT = float(os.getenv("DRY_PERCENT", "30"))
 WET_PERCENT = float(os.getenv("WET_PERCENT", "70"))
 FORECAST_DRY_PERCENT = float(os.getenv("FORECAST_DRY_PERCENT", str(DRY_PERCENT)))
 
+_sim_soil = None
 
 def simulated_sensor_values(env=None):
+    global _sim_soil
+    import random, math
     source = os.environ if env is None else env
-    return (
-        float(source.get("SIM_TEMPERATURE", "32")),
-        float(source.get("SIM_HUMIDITY", "55")),
-        float(source.get("SIM_SOIL_VALUE", "45")),
-    )
+    
+    if _sim_soil is None:
+        _sim_soil = float(source.get("SIM_SOIL_VALUE", "45"))
+    else:
+        # Decays ~0.3% per cycle to show a nice downward trend for the forecast
+        _sim_soil -= random.uniform(0.1, 0.4)
+        _sim_soil = max(10.0, _sim_soil)
+        
+    base_t = float(source.get("SIM_TEMPERATURE", "32"))
+    base_h = float(source.get("SIM_HUMIDITY", "55"))
+    
+    # Add a slight sine wave and random noise to temp/humidity to make it look alive
+    wave = math.sin(time.time() / 100.0)
+    temp = base_t + wave * 1.5 + random.uniform(-0.2, 0.2)
+    hum = base_h - wave * 4.0 + random.uniform(-1.0, 1.0)
+    
+    return round(temp, 1), round(hum, 1), round(_sim_soil, 2)
 
 
 def board_pin(pin_name):
@@ -92,20 +121,24 @@ def board_pin(pin_name):
 
 
 def setup_oled():
-    import adafruit_ssd1306
-    import board
-    import busio
-    from PIL import Image, ImageDraw, ImageFont
+    try:
+        import adafruit_ssd1306
+        import board
+        import busio
+        from PIL import Image, ImageDraw, ImageFont
 
-    i2c = busio.I2C(board.SCL, board.SDA)
-    oled = adafruit_ssd1306.SSD1306_I2C(128, 64, i2c, addr=0x3C)
-    oled.fill(0)
-    oled.show()
+        i2c = busio.I2C(board.SCL, board.SDA)
+        oled = adafruit_ssd1306.SSD1306_I2C(128, 64, i2c, addr=0x3C)
+        oled.fill(0)
+        oled.show()
 
-    image = Image.new("1", (oled.width, oled.height))
-    draw = ImageDraw.Draw(image)
-    font = ImageFont.load_default()
-    return oled, image, draw, font
+        image = Image.new("1", (oled.width, oled.height))
+        draw = ImageDraw.Draw(image)
+        font = ImageFont.load_default()
+        return oled, image, draw, font
+    except Exception as e:
+        print(f"⚠️ OLED screen not detected ({e}). Continuing without display...")
+        return None, None, None, None
 
 
 def show_oled(oled, image, draw, font, reading):
@@ -116,33 +149,34 @@ def show_oled(oled, image, draw, font, reading):
         draw.text((0, index * 12), line, font=font, fill=255)
     oled.image(image)
     oled.show()
-    
+
+
 def read_dht11(dht):
-    for _ in range(5):
+    for attempt in range(3):
         try:
             return dht.temperature, dht.humidity
         except RuntimeError as exc:
-            log_event("DHT_READ_FAILED", str(exc), DEBUG_MODE)
-            time.sleep(0.5)
+            if attempt == 2:
+                log_event("DHT_READ_FAILED", str(exc), DEBUG_MODE)
+                return None, None
+            time.sleep(2.0)  # DHT11 needs 2 seconds between reads
+    return None, None
 
 
 def read_soil_smoothed(soil_sensor, num_samples=10, delay=0.05):
-    # 1. Smoothing / Averaging Data Filter
+    """Averaging/smoothing filter: takes multiple samples and returns the mean."""
     samples = []
     for _ in range(num_samples):
         samples.append(soil_sensor.value)
         time.sleep(delay)
     return sum(samples) / len(samples)
 
+
 def read_hardware_values(dht, soil_sensor):
     temperature, humidity = read_dht11(dht)
-    
-    # Get the smoothed analog reading
-    avg_raw_soil = read_soil_smoothed(soil_sensor)
-    
-    # Convert the smoothed reading to a percentage
+    raw_value = read_soil_smoothed(soil_sensor)
     soil_value = raw_to_moisture_percent(
-        avg_raw_soil,
+        raw_value,
         dry_raw=SOIL_DRY_RAW,
         wet_raw=SOIL_WET_RAW,
     )
@@ -168,7 +202,13 @@ def build_reading_from_values(
         dry_threshold=DRY_PERCENT,
         wet_threshold=WET_PERCENT,
     )
-    pump_status = decide_pump_status_with_forecast(soil_status, forecast_result.forecast_risk, control_mode)
+    pump_status = decide_pump_status_with_forecast(
+        soil_status,
+        forecast_result.forecast_risk,
+        control_mode,
+        forecast_soil_4hr=forecast_result.forecast_soil_4hr,
+        dry_threshold=DRY_PERCENT,
+    )
 
     return SensorReading(
         timestamp=timestamp,
@@ -196,24 +236,6 @@ def build_reading_from_values(
         debug_status=debug_status,
     )
 
-def run_pump_self_test(gpio):
-    if not gpio:
-        return
-
-    print("Pump self-test started.")
-
-    try:
-        print("Pump ON")
-        gpio.output(RELAY_PIN, gpio.LOW)
-        time.sleep(PUMP_SELF_TEST_ON_SECONDS)
-
-        print("Pump OFF")
-        gpio.output(RELAY_PIN, gpio.HIGH)
-        time.sleep(PUMP_SELF_TEST_OFF_SECONDS)
-
-    finally:
-        gpio.output(RELAY_PIN, gpio.HIGH)
-        print("Pump self-test finished. Pump forced OFF.")
 
 def setup_hardware():
     import adafruit_dht
@@ -225,15 +247,14 @@ def setup_hardware():
     oled, image, draw, font = setup_oled()
 
     GPIO.setmode(GPIO.BCM)
-    GPIO.setup(RELAY_PIN, GPIO.OUT)
-    GPIO.output(RELAY_PIN, GPIO.HIGH)
+    GPIO.setup(RELAY_PIN, GPIO.OUT, initial=GPIO.LOW)
     return GPIO, dht, soil_sensor, oled, image, draw, font
 
 
 def cleanup(gpio=None, dht=None, oled=None):
     print("Stopping system...")
     if gpio:
-        gpio.output(RELAY_PIN, gpio.HIGH)
+        gpio.output(RELAY_PIN, gpio.LOW)  # LOW = OFF for active-HIGH relay
         gpio.cleanup()
     if dht:
         dht.exit()
@@ -249,6 +270,27 @@ def log_pump_reason(reading):
         log_event("PUMP_ON_DRY", "soil is dry", DEBUG_MODE)
     elif reading.forecast_risk == "Dry Forecast":
         log_event("PUMP_ON_FORECAST_DRY", "forecast predicts future dry soil", DEBUG_MODE)
+
+
+def run_timed_pump(gpio, reading):
+    """Run pump for a fixed duration based on trigger reason, then turn it off."""
+    if not gpio or reading.pump_status != "ON":
+        return
+
+    if reading.soil_status == "DRY":
+        duration = PUMP_DURATION_SECONDS
+        reason = "soil DRY"
+    elif reading.forecast_risk == "Dry Forecast":
+        duration = PUMP_FORECAST_DURATION_SECONDS
+        reason = "4h forecast DRY"
+    else:
+        return
+
+    print(f"Pump ON ({reason}) — running for {duration}s...")
+    set_pump_output(gpio, RELAY_PIN, "ON")
+    time.sleep(duration)
+    set_pump_output(gpio, RELAY_PIN, "OFF")
+    print("Pump OFF — timer complete.")
 
 
 def clean_number(value):
@@ -310,11 +352,30 @@ def run_cycle(gpio, dht, soil_sensor, oled, image, draw, font, model_bundle, fav
     )
 
     if gpio:
-        set_pump_output(gpio, RELAY_PIN, reading.pump_status)
+        run_timed_pump(gpio, reading)
+    elif SIMULATION_MODE and reading.pump_status == "ON":
+        global _sim_soil
+        if _sim_soil is not None:
+            _sim_soil = min(WET_PERCENT + 10.0, _sim_soil + 35.0)
+            print(f"Simulation Pump ON: Soil moisture instantly jumped to {_sim_soil}%")
+            
     log_pump_reason(reading)
 
-    write_csv_reading(CSV_FILE, reading)
-    log_event("CSV_WRITE_OK", f"saved row to {CSV_FILE}", DEBUG_MODE)
+    if SAVE_DATA:
+        write_csv_reading(CSV_FILE, reading)
+        log_event("CSV_WRITE_OK", f"saved row to {CSV_FILE}", DEBUG_MODE)
+        write_db_reading(DB_FILE, reading)
+        log_event("DB_WRITE_OK", f"saved row to {DB_FILE}", DEBUG_MODE)
+        
+        # --- NEW CODE: Export JSON for static dashboard ---
+        import pandas as pd
+        json_file = BASE_DIR / "outputs" / "plant_data.json"
+        json_file.parent.mkdir(exist_ok=True)
+        df = pd.read_csv(CSV_FILE)
+        df.to_json(json_file, orient="records")
+        log_event("JSON_WRITE_OK", f"saved json to {json_file}", DEBUG_MODE)
+        # --------------------------------------------------
+
     send_to_favoriot(favoriot_config, reading, logger=lambda message: log_event("FAVORIOT", message, DEBUG_MODE))
     show_oled(oled, image, draw, font, reading)
 
@@ -337,7 +398,15 @@ def run_cycle(gpio, dht, soil_sensor, oled, image, draw, font, model_bundle, fav
 
 
 def main():
+    if SIMULATION_MODE or DEMO_MODE:
+        import shutil
+        plant_csv = BASE_DIR / "plant_data.csv"
+        if plant_csv.exists():
+            print(f"Copying historical data from {plant_csv.name} to {CSV_FILE.name} for testing...")
+            shutil.copy2(plant_csv, CSV_FILE)
+
     ensure_csv_header(CSV_FILE)
+    init_db(DB_FILE)  # create sensor_data.db if it doesn't exist
     favoriot_config = load_favoriot_config()
     telegram_config = telegram_config_from_env()
     model_bundle = load_forecast_model(FORECAST_MODEL_PATH)
@@ -369,9 +438,6 @@ def main():
     if not SIMULATION_MODE:
         gpio, dht, soil_sensor, oled, image, draw, font = setup_hardware()
 
-        if PUMP_SELF_TEST:
-            run_pump_self_test(gpio)
-            
     try:
         while True:
             try:

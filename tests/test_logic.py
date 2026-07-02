@@ -40,10 +40,24 @@ class PlantMonitorLogicTest(unittest.TestCase):
         self.assertEqual(decide_pump_status_with_ml("WET", "Dry Soon", "control"), "OFF")
 
     def test_decide_pump_status_with_forecast_respects_recommend_and_control(self):
+        # Current soil DRY → always pump ON regardless of mode or forecast
         self.assertEqual(decide_pump_status_with_forecast("DRY", "OK", "recommend"), "ON")
-        self.assertEqual(decide_pump_status_with_forecast("OPTIMAL", "Dry Forecast", "recommend"), "OFF")
-        self.assertEqual(decide_pump_status_with_forecast("OPTIMAL", "Dry Forecast", "control"), "ON")
-        self.assertEqual(decide_pump_status_with_forecast("WET", "Dry Forecast", "control"), "OFF")
+        self.assertEqual(decide_pump_status_with_forecast("DRY", "Dry Forecast", "control", forecast_soil_4hr=20.0), "ON")
+
+        # Current soil WET → always pump OFF
+        self.assertEqual(decide_pump_status_with_forecast("WET", "Dry Forecast", "control", forecast_soil_4hr=20.0), "OFF")
+
+        # 4h forecast DRY + control → pump ON early
+        self.assertEqual(decide_pump_status_with_forecast("OPTIMAL", "Dry Forecast", "control", forecast_soil_4hr=20.0), "ON")
+
+        # 4h forecast DRY + recommend → pump OFF (just alert)
+        self.assertEqual(decide_pump_status_with_forecast("OPTIMAL", "Dry Forecast", "recommend", forecast_soil_4hr=20.0), "OFF")
+
+        # 6h/8h forecast DRY but 4h OPTIMAL + control → pump OFF (alert only)
+        self.assertEqual(decide_pump_status_with_forecast("OPTIMAL", "Dry Forecast", "control", forecast_soil_4hr=55.0), "OFF")
+
+        # No 4h value provided + control → pump OFF (not enough info)
+        self.assertEqual(decide_pump_status_with_forecast("OPTIMAL", "Dry Forecast", "control", forecast_soil_4hr=None), "OFF")
 
     def test_load_favoriot_config_reads_env_without_hardcoded_secret(self):
         env = {

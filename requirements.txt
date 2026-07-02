@@ -12,9 +12,17 @@ Pillow
 # Favoriot REST API
 requests
 
-# Streamlit dashboard and machine learning
-streamlit
+# Backend web server (replaces Streamlit)
+Flask
+
+# Machine learning
 pandas
 scikit-learn
 statsmodels
 joblib
+
+# Authentication
+PyYAML
+bcrypt
+
+# Grafana data backend (no extra pip package needed — uses built-in sqlite3)
