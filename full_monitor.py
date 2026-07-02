@@ -247,15 +247,14 @@ def setup_hardware():
     oled, image, draw, font = setup_oled()
 
     GPIO.setmode(GPIO.BCM)
-    GPIO.setup(RELAY_PIN, GPIO.OUT)
-    GPIO.output(RELAY_PIN, GPIO.HIGH)
+    GPIO.setup(RELAY_PIN, GPIO.OUT, initial=GPIO.LOW)
     return GPIO, dht, soil_sensor, oled, image, draw, font
 
 
 def cleanup(gpio=None, dht=None, oled=None):
     print("Stopping system...")
     if gpio:
-        gpio.output(RELAY_PIN, gpio.HIGH)
+        gpio.output(RELAY_PIN, gpio.LOW)  # LOW = OFF for active-HIGH relay
         gpio.cleanup()
     if dht:
         dht.exit()

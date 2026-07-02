@@ -10,3 +10,8 @@ data/*.csv
 auth_config.yaml
 sensor_data.db
 .env
+testing/
+.env
+__pycache__/
+*.pyc
+.telegram_state.json

@@ -190,7 +190,7 @@ def send_to_favoriot(config, reading, post=requests.post, logger=None):
 
 
 def set_pump_output(gpio, relay_pin, pump_status):
-    gpio.output(relay_pin, gpio.LOW if pump_status == "ON" else gpio.HIGH)
+    gpio.output(relay_pin, gpio.HIGH if pump_status == "ON" else gpio.LOW)
 
 
 def format_oled_lines(reading):
